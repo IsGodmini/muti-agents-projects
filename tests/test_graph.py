@@ -25,17 +25,17 @@ from app.models.schemas import (
 TEST_RESOURCES = [
     ResourceCandidate(
         id="res-1", name="测试博物馆", category="museum", location="杭州",
-        price_per_person=30, recommended_time=120, opening_hours="09:00-17:00",
+        price_per_person=30, recommended_minutes=120, opening_hours="09:00-17:00",
         audience_tags=["亲子"], evidence="test", score=0.9, provider="tavily_mcp",
     ),
     ResourceCandidate(
         id="res-2", name="测试湿地", category="outdoor", location="杭州",
-        price_per_person=80, recommended_time=180, opening_hours="08:30-17:30",
+        price_per_person=80, recommended_minutes=180, opening_hours="08:30-17:30",
         audience_tags=["自然教育"], evidence="test", score=0.85, provider="tavily_mcp",
     ),
     ResourceCandidate(
         id="res-3", name="测试工坊", category="workshop", location="杭州",
-        price_per_person=60, recommended_time=90, opening_hours="09:00-18:00",
+        price_per_person=60, recommended_minutes=90, opening_hours="09:00-18:00",
         audience_tags=["手作"], evidence="test", score=0.8, provider="tavily_mcp",
     ),
 ]
