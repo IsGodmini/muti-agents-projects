@@ -216,7 +216,7 @@ class QualityAssessment(BaseModel):
 class TravelTimePair(BaseModel):
     from_index: int = Field(description="出发资源序号")
     to_index: int = Field(description="到达资源序号")
-    minutes: int = Field(ge=5, le=300, description="预估交通时间（分钟）")
+    time: int = Field(ge=5, le=300, description="预估交通时间（分钟）")
 
 
 class TravelTimeMatrix(BaseModel):

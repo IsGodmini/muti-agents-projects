@@ -243,7 +243,7 @@ async def _estimate_travel_times(settings, resources) -> dict[str, int]:
         if 0 <= pair.from_index < len(resources) and 0 <= pair.to_index < len(resources):
             source_id = resources[pair.from_index].id
             target_id = resources[pair.to_index].id
-            travel_times[f"{source_id}->{target_id}"] = pair.minutes
+            travel_times[f"{source_id}->{target_id}"] = pair.time
     logger.info("LLM estimated %d travel-time pairs", len(travel_times))
     return travel_times
 
