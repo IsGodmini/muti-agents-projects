@@ -1,4 +1,4 @@
-"""TripOps AI — 命令行旅行策划 Agent"""
+"""TripOps AI — 对话式旅行策划 Agent"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from langgraph.types import Command
 from app.agents.graph import build_planning_graph
 from app.agents.prompts import PARSE_USER_INPUT_SYSTEM
 from app.config import get_settings
-from app.models.schemas import PlanRequest
+from app.models.schemas import PlannerConversation, PlanRequest
 from app.services.model_gateway import ModelGateway
 
 CYAN = "\033[36m"
@@ -20,6 +20,8 @@ RED = "\033[31m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
+
+FORCE_KEYWORDS = {"开始", "开始吧", "够了", "就这样", "可以了", "go", "start", "ok", "好"}
 
 
 def header(text: str) -> None:
@@ -44,53 +46,107 @@ def error(text: str) -> None:
     print(f"  {RED}✗ {text}{RESET}")
 
 
-def ask(prompt: str) -> str:
-    return input(f"  {prompt}: ").strip()
+def agent_say(text: str) -> None:
+    print(f"\n  {BOLD}🤖{RESET} {text}")
 
 
-def collect_input() -> str:
-    """Collect key info via simple questions, return combined text for LLM."""
-    header("TripOps AI · 旅行策划 Agent")
-    print("  回答几个问题，Agent 自动完成策划全流程。\n")
-
-    destination = ask("去哪")
-    duration = ask("几天（如：3天2晚）")
-    people = ask("几个人")
-    budget = ask("人均预算（元）")
-    extra = ask("补充（人群、偏好、限制等，可留空）")
-
-    parts = [f"目的地：{destination}", f"行程：{duration}", f"人数：{people}", f"人均预算：{budget}元"]
-    if extra:
-        parts.append(f"补充：{extra}")
-
-    combined = "；".join(parts)
-
-    print(f"\n  {DIM}收到：{combined}{RESET}")
-    confirm = input(f"  {BOLD}开始策划？(回车确认 / n 取消) {RESET}").strip().lower()
-    if confirm in ("n", "no"):
-        raise KeyboardInterrupt
-
-    return combined
+def user_say(text: str) -> None:
+    print(f"  {DIM}👤 {text}{RESET}")
 
 
-async def parse_input(user_input: str) -> PlanRequest:
+async def converse_until_ready() -> PlanRequest:
+    """LLM-driven conversation to collect travel requirements."""
     settings = get_settings()
     gateway = ModelGateway(settings)
-    print(f"\n  {DIM}正在理解你的需求…{RESET}")
-    return await gateway.structured_completion(
-        system_prompt=PARSE_USER_INPUT_SYSTEM,
-        user_prompt=user_input,
-        schema=PlanRequest,
-        timeout_seconds=30,
-    )
+    history: list[str] = []
+
+    header("TripOps AI · 旅行策划 Agent")
+    info("和 Agent 聊聊你的旅行想法，它会问你几个问题。")
+    info("随时可以说「开始吧」直接执行策划。\n")
+
+    first_input = input(f"  {BOLD}👤 {RESET}").strip()
+    if not first_input:
+        first_input = "我想去旅行"
+    user_say(first_input)
+    history.append(f"用户：{first_input}")
+
+    while True:
+        conversation_text = "\n".join(history)
+
+        try:
+            response = await gateway.structured_completion(
+                system_prompt=PARSE_USER_INPUT_SYSTEM,
+                user_prompt=f"以下是目前的对话：\n{conversation_text}",
+                schema=PlannerConversation,
+                timeout_seconds=30,
+            )
+        except Exception as exc:  # noqa: BLE001
+            error(f"理解失败: {exc}")
+            retry = input(f"  {BOLD}👤 再说一次: {RESET}").strip()
+            history.append(f"用户：{retry}")
+            continue
+
+        if response.ready:
+            nights = min(response.nights, response.days - 1)
+            return PlanRequest(
+                title=response.title or f"{response.destination}旅行",
+                product_type=response.product_type,
+                destination=response.destination,
+                days=response.days,
+                nights=nights,
+                group_size=response.group_size,
+                budget_per_person=response.budget_per_person,
+                target_margin_rate=response.target_margin_rate,
+                target_audience=response.target_audience or "普通游客",
+                themes=response.themes,
+                constraints=response.constraints,
+            )
+
+        agent_say(response.question)
+        user_input = input(f"  {BOLD}👤 {RESET}").strip()
+
+        if user_input.lower() in FORCE_KEYWORDS:
+            history.append("用户：信息够了，直接开始策划。")
+            try:
+                final = await gateway.structured_completion(
+                    system_prompt=PARSE_USER_INPUT_SYSTEM,
+                    user_prompt=(
+                        f"以下是目前的对话：\n{chr(10).join(history)}\n\n"
+                        "用户要求立即开始。用已有信息填写所有字段，ready 必须为 true。"
+                    ),
+                    schema=PlannerConversation,
+                    timeout_seconds=30,
+                )
+                nights = min(final.nights, final.days - 1)
+                return PlanRequest(
+                    title=final.title or f"{final.destination}旅行",
+                    product_type=final.product_type,
+                    destination=final.destination,
+                    days=final.days,
+                    nights=nights,
+                    group_size=final.group_size,
+                    budget_per_person=final.budget_per_person,
+                    target_margin_rate=final.target_margin_rate,
+                    target_audience=final.target_audience or "普通游客",
+                    themes=final.themes,
+                    constraints=final.constraints,
+                )
+            except Exception:  # noqa: BLE001
+                error("无法生成方案，请补充目的地和天数。")
+                continue
+
+        if not user_input:
+            continue
+        user_say(user_input)
+        history.append(f"用户：{user_input}")
 
 
 def print_request(request: PlanRequest) -> None:
-    section("需求解析结果")
+    section("需求确认")
     print(f"  产品: {request.title}")
     print(f"  类型: {request.product_type.value}  |  目的地: {request.destination}")
     print(f"  周期: {request.days}天{request.nights}晚  |  人数: {request.group_size}")
-    print(f"  预算: ¥{request.budget_per_person}/人  |  毛利率: {request.target_margin_rate:.0%}")
+    print(f"  预算: ¥{request.budget_per_person}/人")
     print(f"  客群: {request.target_audience}")
     if request.themes:
         print(f"  主题: {', '.join(request.themes)}")
@@ -135,8 +191,6 @@ def print_quality(data: dict) -> None:
     print(f"    客群匹配  {quality['audience_fit_score']}/100")
     for suggestion in quality.get("suggestions", []):
         info(f"💡 {suggestion}")
-    for issue in quality.get("blocking_issues", []):
-        error(f"⛔ {issue}")
 
 
 def print_constraints(data: dict) -> None:
@@ -162,8 +216,7 @@ async def run_workflow(request: PlanRequest) -> None:
     print_request(request)
 
     section("多 Agent 工作流执行中")
-    print(f"  {DIM}需求解析 → 资源检索 → 行程规划 → 约束校验 → 成本核算 → 质量审核{RESET}")
-    print(f"  {DIM}Plan ID: {plan_id}{RESET}\n")
+    print(f"  {DIM}需求解析 → 资源检索 → 行程规划 → 约束校验 → 成本核算 → 质量审核{RESET}\n")
 
     result = await graph.ainvoke(
         {
@@ -178,7 +231,6 @@ async def run_workflow(request: PlanRequest) -> None:
     data = {k: v for k, v in result.items() if not k.startswith("__")}
 
     success(f"Skill: {data.get('selected_skill', 'unknown')}")
-    success(f"资源来源: {data.get('resource_search_provider', 'unknown')}")
     success(f"检索到 {len(data.get('resources', []))} 个资源")
 
     print_itinerary(data)
@@ -187,33 +239,24 @@ async def run_workflow(request: PlanRequest) -> None:
     print_quality(data)
 
     if data.get("current_stage") != "waiting_approval":
-        error(f"工作流异常终止: {data.get('current_stage')}")
+        error(f"工作流异常: {data.get('current_stage')}")
         for err in data.get("errors", []):
             error(err)
         return
 
     header("确认方案")
-    decision = input(f"  {BOLD}满意这份方案吗？(回车确认 / n 放弃) {RESET}").strip().lower()
+    decision = input(f"  {BOLD}满意吗？(回车确认 / n 放弃) {RESET}").strip().lower()
 
     if decision in ("", "y", "yes"):
         print(f"\n  {DIM}正在存档…{RESET}\n")
         final = await graph.ainvoke(
-            Command(resume={
-                "approved": True,
-                "reviewer_id": "cli-user",
-                "comment": "用户确认",
-            }),
+            Command(resume={"approved": True, "reviewer_id": "cli-user", "comment": "确认"}),
             config=config,
         )
-        final_data = {k: v for k, v in final.items() if not k.startswith("__")}
-        success(f"方案已存档！状态: {final_data.get('current_stage')}")
+        success(f"方案已存档！状态: {final.get('current_stage')}")
     else:
         await graph.ainvoke(
-            Command(resume={
-                "approved": False,
-                "reviewer_id": "cli-user",
-                "comment": "用户放弃",
-            }),
+            Command(resume={"approved": False, "reviewer_id": "cli-user", "comment": "放弃"}),
             config=config,
         )
         info("方案已放弃。")
@@ -222,8 +265,7 @@ async def run_workflow(request: PlanRequest) -> None:
 async def main() -> None:
     while True:
         try:
-            user_input = collect_input()
-            request = await parse_input(user_input)
+            request = await converse_until_ready()
             await run_workflow(request)
         except KeyboardInterrupt:
             print(f"\n\n  {DIM}再见！{RESET}\n")

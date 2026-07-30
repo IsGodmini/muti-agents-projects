@@ -253,3 +253,19 @@ class CostItemEstimate(BaseModel):
 class CostBreakdown(BaseModel):
     items: list[CostItemEstimate]
     cost_notes: str = ""
+
+
+class PlannerConversation(BaseModel):
+    ready: bool = Field(description="信息是否足够开始策划")
+    question: str = Field(default="", description="不够时向用户提的下一个问题")
+    title: str = Field(default="", description="产品名称")
+    product_type: str = Field(default="family_trip", description="family_trip/study_tour/corporate_team_building/senior_friendly")
+    destination: str = Field(default="")
+    days: int = Field(default=3, ge=1, le=15)
+    nights: int = Field(default=2, ge=0, le=14)
+    group_size: int = Field(default=2, ge=1, le=500)
+    budget_per_person: int = Field(default=2000, ge=100, le=100_000)
+    target_margin_rate: float = Field(default=0.15, ge=0, le=0.8)
+    target_audience: str = Field(default="")
+    themes: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
