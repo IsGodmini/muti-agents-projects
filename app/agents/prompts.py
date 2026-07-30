@@ -97,16 +97,15 @@ COST_ESTIMATION_SYSTEM = """\
 - 在 cost_notes 中说明关键估价依据"""
 
 PARSE_USER_INPUT_SYSTEM = """\
-你是一位文旅产品需求分析师。用户会用自然语言描述他们的旅行产品需求。
-请从中提取结构化的产品参数。
+你是一位旅行需求分析师。用户会提供简单的旅行信息（目的地、天数、人数、预算和可选补充）。
+请从中推断完整的结构化产品参数。
 
 规则：
-- product_type 只能是：family_trip / study_tour / corporate_team_building / senior_friendly
-- 根据描述中的关键词推断：亲子→family_trip，研学→study_tour，团建→corporate_team_building，老年/银龄→senior_friendly
-- days 和 nights 从"X天Y夜"中提取，nights 必须小于 days
-- 如果用户没有明确说明某个字段，使用合理默认值
-- title 应简洁概括产品主题
-- themes 从描述中提取关键主题词
-- constraints 从描述中提取限制条件
+- product_type 根据补充信息推断：提到孩子/亲子→family_trip，研学/学习→study_tour，公司/团建→corporate_team_building，老人/银龄→senior_friendly，无法判断时默认 family_trip
+- days 和 nights 从"X天Y晚"或"X天Y夜"中提取，nights 必须小于 days
+- title 应简洁有吸引力，如"北京四天三晚历史研学之旅"
+- target_audience 从补充信息推断，无补充则根据 product_type 给出合理描述
+- themes 从补充信息中提取关键词，无补充则根据目的地给出 2-3 个合理主题
+- constraints 从补充信息中提取限制条件
 - target_margin_rate 默认 0.15
-- 如果信息严重不足（缺少目的地或天数），将合理推断值填入并在 constraints 中注明"""
+- group_size、budget_per_person 直接使用用户输入的数字"""

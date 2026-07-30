@@ -1,4 +1,4 @@
-"""TripOps AI — 命令行文旅产品智能策划 Agent"""
+"""TripOps AI — 命令行旅行策划 Agent"""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from app.agents.graph import build_planning_graph
+from app.agents.prompts import PARSE_USER_INPUT_SYSTEM
+from app.config import get_settings
 from app.models.schemas import PlanRequest
+from app.services.model_gateway import ModelGateway
 
 CYAN = "\033[36m"
 GREEN = "\033[32m"
@@ -17,15 +20,6 @@ RED = "\033[31m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
-
-PRODUCT_TYPES = {
-    "1": ("family_trip", "亲子旅行"),
-    "2": ("study_tour", "研学旅行"),
-    "3": ("corporate_team_building", "企业团建"),
-    "4": ("senior_friendly", "银龄慢游"),
-}
-
-
 
 
 def header(text: str) -> None:
@@ -50,105 +44,58 @@ def error(text: str) -> None:
     print(f"  {RED}✗ {text}{RESET}")
 
 
-def ask(prompt: str, default: str = "") -> str:
-    hint = f" {DIM}[{default}]{RESET}" if default else ""
-    answer = input(f"  {prompt}{hint}: ").strip()
-    return answer or default
+def ask(prompt: str) -> str:
+    return input(f"  {prompt}: ").strip()
 
 
-def ask_choice(prompt: str, options: dict[str, tuple[str, str]], default: str = "1") -> str:
-    print(f"  {prompt}")
-    for key, (_, label) in options.items():
-        marker = " ●" if key == default else ""
-        print(f"    {key}. {label}{marker}")
-    choice = input(f"  请选择 {DIM}[{default}]{RESET}: ").strip()
-    return choice if choice in options else default
+def collect_input() -> str:
+    """Collect key info via simple questions, return combined text for LLM."""
+    header("TripOps AI · 旅行策划 Agent")
+    print("  回答几个问题，Agent 自动完成策划全流程。\n")
 
+    destination = ask("去哪")
+    duration = ask("几天（如：3天2晚）")
+    people = ask("几个人")
+    budget = ask("人均预算（元）")
+    extra = ask("补充（人群、偏好、限制等，可留空）")
 
-def ask_themes() -> list[str]:
-    raw = ask("旅行主题（逗号分隔，自由输入）", "")
-    if not raw:
-        return []
-    return [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
-
-
-def collect_requirements() -> PlanRequest:
-    header("TripOps AI · 文旅产品智能策划")
-    print("  按提示填写产品信息，直接回车使用默认值。\n")
-
-    # 1. Destination
-    section("基础信息")
-    destination = ask("目的地", "杭州")
-
-    # 2. Product type
-    type_choice = ask_choice("产品类型", PRODUCT_TYPES, "1")
-    product_type, type_label = PRODUCT_TYPES[type_choice]
-    success(f"已选择: {type_label}")
-
-    # 3. Title
-    default_title = f"{destination} · {type_label}产品"
-    title = ask("产品名称", default_title)
-
-    # 4. Duration
-    section("行程周期")
-    days = int(ask("天数", "3") or "3")
-    nights = int(ask("晚数", str(max(days - 1, 0))) or str(max(days - 1, 0)))
-    if nights >= days:
-        nights = days - 1
-        info(f"晚数已调整为 {nights}（必须小于天数）")
-
-    # 5. Group & budget
-    section("客群与预算")
-    group_size = int(ask("团队人数", "30") or "30")
-    budget = int(ask("人均预算上限（元）", "1800") or "1800")
-    margin = float(ask("目标毛利率（%）", "15") or "15")
-    audience = ask("目标客群描述", "8-12岁儿童及家长")
-
-    # 6. Themes
-    section("主题选择")
-    themes = ask_themes()
-    if themes:
-        success(f"主题: {', '.join(themes)}")
-
-    # 7. Constraints
-    section("约束条件")
-    constraints_raw = ask("硬性约束（分号分隔，可留空）", "")
-    constraints = [c.strip() for c in constraints_raw.replace("，", ";").split(";") if c.strip()]
-
-    # 8. Extra requirements
-    section("补充信息")
-    extra = ask("还有其他需求或特殊情况吗？（可留空）", "")
+    parts = [f"目的地：{destination}", f"行程：{duration}", f"人数：{people}", f"人均预算：{budget}元"]
     if extra:
-        constraints.append(extra)
+        parts.append(f"补充：{extra}")
 
-    # Summary
-    header("需求确认")
-    print(f"  产品: {title}")
-    print(f"  类型: {type_label}  |  目的地: {destination}")
-    print(f"  周期: {days}天{nights}晚  |  团队: {group_size}人")
-    print(f"  预算: ¥{budget}/人  |  毛利率: {margin:.0f}%")
-    print(f"  客群: {audience}")
-    print(f"  主题: {', '.join(themes)}")
-    if constraints:
-        print(f"  约束: {'; '.join(constraints)}")
+    combined = "；".join(parts)
 
-    confirm = input(f"\n  {BOLD}确认开始策划？(y/n) {DIM}[y]{RESET}: ").strip().lower()
-    if confirm in ("n", "no", "否"):
+    print(f"\n  {DIM}收到：{combined}{RESET}")
+    confirm = input(f"  {BOLD}开始策划？(回车确认 / n 取消) {RESET}").strip().lower()
+    if confirm in ("n", "no"):
         raise KeyboardInterrupt
 
-    return PlanRequest(
-        title=title,
-        product_type=product_type,
-        destination=destination,
-        days=days,
-        nights=nights,
-        group_size=group_size,
-        budget_per_person=budget,
-        target_margin_rate=margin / 100,
-        target_audience=audience,
-        themes=themes,
-        constraints=constraints,
+    return combined
+
+
+async def parse_input(user_input: str) -> PlanRequest:
+    settings = get_settings()
+    gateway = ModelGateway(settings)
+    print(f"\n  {DIM}正在理解你的需求…{RESET}")
+    return await gateway.structured_completion(
+        system_prompt=PARSE_USER_INPUT_SYSTEM,
+        user_prompt=user_input,
+        schema=PlanRequest,
+        timeout_seconds=30,
     )
+
+
+def print_request(request: PlanRequest) -> None:
+    section("需求解析结果")
+    print(f"  产品: {request.title}")
+    print(f"  类型: {request.product_type.value}  |  目的地: {request.destination}")
+    print(f"  周期: {request.days}天{request.nights}晚  |  人数: {request.group_size}")
+    print(f"  预算: ¥{request.budget_per_person}/人  |  毛利率: {request.target_margin_rate:.0%}")
+    print(f"  客群: {request.target_audience}")
+    if request.themes:
+        print(f"  主题: {', '.join(request.themes)}")
+    if request.constraints:
+        print(f"  约束: {'; '.join(request.constraints)}")
 
 
 def print_itinerary(data: dict) -> None:
@@ -212,6 +159,8 @@ async def run_workflow(request: PlanRequest) -> None:
     config = {"configurable": {"thread_id": thread_id}}
     graph = build_planning_graph()
 
+    print_request(request)
+
     section("多 Agent 工作流执行中")
     print(f"  {DIM}需求解析 → 资源检索 → 行程规划 → 约束校验 → 成本核算 → 质量审核{RESET}")
     print(f"  {DIM}Plan ID: {plan_id}{RESET}\n")
@@ -243,44 +192,38 @@ async def run_workflow(request: PlanRequest) -> None:
             error(err)
         return
 
-    header("人工审批")
-    print("  方案已通过自动审核，等待确认。\n")
-    decision = input(f"  {BOLD}是否批准？(y/n) {DIM}[y]{RESET}: ").strip().lower()
+    header("确认方案")
+    decision = input(f"  {BOLD}满意这份方案吗？(回车确认 / n 放弃) {RESET}").strip().lower()
 
-    if decision in ("", "y", "yes", "是"):
-        print(f"\n  {DIM}正在生成交付版本…{RESET}\n")
+    if decision in ("", "y", "yes"):
+        print(f"\n  {DIM}正在存档…{RESET}\n")
         final = await graph.ainvoke(
             Command(resume={
                 "approved": True,
                 "reviewer_id": "cli-user",
-                "comment": "CLI 审批通过",
+                "comment": "用户确认",
             }),
             config=config,
         )
         final_data = {k: v for k, v in final.items() if not k.startswith("__")}
-        poster = final_data.get("poster_asset", {})
-        success(f"方案已交付！状态: {final_data.get('current_stage')}")
-        if poster:
-            success(f"海报: {poster.get('status', 'unknown')}")
-            if poster.get("note"):
-                info(poster["note"])
+        success(f"方案已存档！状态: {final_data.get('current_stage')}")
     else:
-        comment = input("  驳回意见（可留空）: ").strip()
         await graph.ainvoke(
             Command(resume={
                 "approved": False,
                 "reviewer_id": "cli-user",
-                "comment": comment or "CLI 驳回",
+                "comment": "用户放弃",
             }),
             config=config,
         )
-        error("方案已驳回。")
+        info("方案已放弃。")
 
 
 async def main() -> None:
     while True:
         try:
-            request = collect_requirements()
+            user_input = collect_input()
+            request = await parse_input(user_input)
             await run_workflow(request)
         except KeyboardInterrupt:
             print(f"\n\n  {DIM}再见！{RESET}\n")
@@ -291,8 +234,8 @@ async def main() -> None:
             traceback.print_exc()
 
         print()
-        again = input(f"  {BOLD}继续策划下一个产品？(y/n) {DIM}[n]{RESET}: ").strip().lower()
-        if again not in ("y", "yes", "是"):
+        again = input(f"  {BOLD}再策划一个？(回车继续 / n 退出) {RESET}").strip().lower()
+        if again in ("n", "no"):
             print(f"\n  {DIM}再见！{RESET}\n")
             break
 
