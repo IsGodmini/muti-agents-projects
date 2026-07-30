@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import logging
+from typing import TypeVar
+
+import httpx
+from pydantic import BaseModel
+
+from app.config import Settings
+
+logger = logging.getLogger(__name__)
+
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
+
+
+def _schema_hint(schema: type[BaseModel]) -> str:
+    """Build a concise field description instead of dumping full JSON Schema."""
+    props = schema.model_json_schema().get("properties", {})
+    lines = []
+    for name, info in props.items():
+        field_type = info.get("type", "any")
+        desc = info.get("description", "")
+        default = info.get("default")
+        hint = f"  {name}: {field_type}"
+        if desc:
+            hint += f"  ({desc})"
+        if default is not None:
+            hint += f"  [默认: {default}]"
+        lines.append(hint)
+    return "\n".join(lines)
+
+
+class ModelGateway:
+    """OpenAI-compatible gateway for LLM services (Ark, Ollama, etc.)."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
+    async def structured_completion(
+        self,
+        *,
+        model: str | None = None,
+        system_prompt: str,
+        user_prompt: str,
+        schema: type[SchemaT],
+        temperature: float = 0.2,
+        timeout_seconds: float = 60,
+    ) -> SchemaT:
+        if self.settings.mock_model_mode:
+            raise RuntimeError("Mock mode expects deterministic graph nodes, not model calls.")
+
+        hint = _schema_hint(schema)
+        full_system = (
+            f"{system_prompt}\n\n"
+            f"请输出一个 JSON 对象，字段如下：\n{hint}\n\n"
+            "重要：直接输出 JSON，不要输出思考过程、解释、markdown 或其他文字。"
+        )
+
+        api_key = self.settings.llm_api_key.get_secret_value()
+        payload: dict = {
+            "model": model or self.settings.llm_model,
+            "messages": [
+                {"role": "system", "content": full_system},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+            "thinking": {"type": "disabled"},
+        }
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            response = await client.post(
+                f"{self.settings.llm_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+        content = response.json()["choices"][0]["message"]["content"]
+        content = _extract_json(content)
+        return schema.model_validate_json(content)
+
+
+def _extract_json(text: str) -> str:
+    """Strip markdown fences or thinking blocks that the model may include."""
+    text = text.strip()
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            candidate = part.strip()
+            if candidate.startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate.startswith(("{", "[")):
+                return candidate
+    if text.startswith(("{", "[")):
+        return text
+    start = text.find("{")
+    if start == -1:
+        start = text.find("[")
+    if start == -1:
+        raise ValueError(f"No JSON found in model response: {text[:200]}")
+    return text[start:]

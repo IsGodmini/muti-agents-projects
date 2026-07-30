@@ -1,0 +1,15 @@
+name: emergency_alternative_planning
+version: 1.0.0
+description: 在天气、场地或供应商不可用时生成约束等价的替代行程。
+product_types: []
+allowed_tools:
+  - search_attractions
+  - calculate_route_matrix
+  - optimize_itinerary
+  - calculate_product_cost
+  - save_plan_version
+quality_gates:
+  replacement_coverage: 100
+  budget_variance_percent: 10
+max_retries: 2
+approval_required: true

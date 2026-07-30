@@ -1,0 +1,13 @@
+name: itinerary_quality_review
+version: 1.0.0
+description: 对行程事实、可执行性、预算、客群匹配与风险进行独立审核。
+product_types: []
+allowed_tools:
+  - calculate_route_matrix
+  - calculate_product_cost
+  - submit_for_approval
+quality_gates:
+  blocking_issue_count: 0
+  overall_score: 85
+max_retries: 2
+approval_required: true

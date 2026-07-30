@@ -1,0 +1,17 @@
+name: corporate_team_building
+version: 1.1.0
+description: 面向企业团队设计兼顾业务目标、协作体验和场地容量的团建产品。
+product_types:
+  - corporate_team_building
+allowed_tools:
+  - search_attractions
+  - calculate_route_matrix
+  - optimize_itinerary
+  - calculate_product_cost
+  - save_plan_version
+  - submit_for_approval
+quality_gates:
+  capacity_match_score: 95
+  schedule_feasibility_score: 90
+max_retries: 2
+approval_required: true

@@ -1,0 +1,17 @@
+name: study_tour_planning
+version: 1.2.1
+description: 将文旅资源映射为具有学习目标、研学任务与成果要求的产品方案。
+product_types:
+  - study_tour
+allowed_tools:
+  - search_attractions
+  - calculate_route_matrix
+  - optimize_itinerary
+  - calculate_product_cost
+  - save_plan_version
+  - submit_for_approval
+quality_gates:
+  learning_objective_coverage: 90
+  fact_traceability_score: 92
+max_retries: 2
+approval_required: true
