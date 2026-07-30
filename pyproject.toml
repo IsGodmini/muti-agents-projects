@@ -4,22 +4,12 @@ version = "0.1.0"
 description = "TripOps AI multi-agent travel product planning backend"
 requires-python = ">=3.12"
 dependencies = [
-  "alembic>=1.14,<2",
-  "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
-  "langchain-core>=0.3,<2",
   "langgraph>=0.2,<2",
   "mcp>=1.28,<2",
-  "minio>=7.2,<8",
-  "opentelemetry-api>=1.29,<2",
-  "opentelemetry-sdk>=1.29,<2",
   "ortools>=9.11,<10",
-  "pgvector>=0.3,<1",
   "pydantic-settings>=2.7,<3",
-  "pyyaml>=6,<7",
-  "sqlalchemy[asyncio]>=2.0,<3",
-  "structlog>=24.4,<26",
   "uvicorn[standard]>=0.34,<1",
 ]
 

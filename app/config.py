@@ -17,11 +17,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
 
-    database_url: str = "postgresql+asyncpg://tripops:tripops@postgres:5432/tripops"
-    redis_url: str = "redis://redis:6379/0"
-    minio_endpoint: str = "minio:9000"
-    minio_access_key: str = "tripops"
-    minio_secret_key: str = "tripops-secret"
 
     llm_base_url: str = "https://ark.cn-beijing.volces.com/api/coding/v3"
     llm_api_key: SecretStr = SecretStr("")
@@ -34,14 +29,12 @@ class Settings(BaseSettings):
     mock_imagegen: bool = True
 
     mock_model_mode: bool = False
-    skills_directory: str = "skills"
 
     tavily_search_enabled: bool = True
     tavily_mcp_url: str = "https://mcp.tavily.com/mcp"
     tavily_api_key: SecretStr | None = None
     tavily_search_depth: str = "advanced"
     tavily_search_timeout_seconds: float = Field(default=30, ge=5, le=120)
-    tavily_fallback_to_demo: bool = True
 
 
 @lru_cache
