@@ -25,7 +25,7 @@ PRODUCT_TYPES = {
     "4": ("senior_friendly", "银龄慢游"),
 }
 
-THEME_OPTIONS = ["自然教育", "传统文化", "非遗手作", "亲子共创", "城市探索", "博物启蒙", "户外拓展", "红色教育"]
+
 
 
 def header(text: str) -> None:
@@ -66,16 +66,10 @@ def ask_choice(prompt: str, options: dict[str, tuple[str, str]], default: str = 
 
 
 def ask_themes() -> list[str]:
-    print("  选择主题（输入编号，逗号分隔，可多选）")
-    for i, theme in enumerate(THEME_OPTIONS, 1):
-        print(f"    {i}. {theme}")
-    raw = input(f"  编号 {DIM}[1,2]{RESET}: ").strip() or "1,2"
-    selected = []
-    for part in raw.replace("，", ",").split(","):
-        part = part.strip()
-        if part.isdigit() and 1 <= int(part) <= len(THEME_OPTIONS):
-            selected.append(THEME_OPTIONS[int(part) - 1])
-    return selected or [THEME_OPTIONS[0]]
+    raw = ask("旅行主题（逗号分隔，自由输入）", "")
+    if not raw:
+        return []
+    return [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
 
 
 def collect_requirements() -> PlanRequest:
@@ -113,7 +107,8 @@ def collect_requirements() -> PlanRequest:
     # 6. Themes
     section("主题选择")
     themes = ask_themes()
-    success(f"已选择: {', '.join(themes)}")
+    if themes:
+        success(f"主题: {', '.join(themes)}")
 
     # 7. Constraints
     section("约束条件")
