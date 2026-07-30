@@ -76,32 +76,20 @@ Tavily MCP 的搜索结果被转换为统一 `ResourceCandidate`：
 }
 ```
 
-网页摘要不能被直接当成最终票价或库存。`opening_hours` 和价格等高时效字段仍标记为待官方确认。
+网页摘要不能被直接当成最终票价或库存。`opening_hours` 和价格等高时效字段由 LLM 充实估算，并标记为待官方确认。
 
-## 6. 降级策略
+## 6. 失败处理
 
-开发环境默认：
+项目不提供演示数据降级。以下情况 `search_attractions` 会明确抛出 `MCPToolError`：
 
-```env
-TAVILY_FALLBACK_TO_DEMO=true
-```
-
-以下情况会降级：
-
-- 未配置 API Key。
+- 未配置 API Key 或 `TAVILY_SEARCH_ENABLED=false`。
 - MCP 初始化失败。
 - Tavily Tool 返回错误。
 - 搜索结果无法解析。
 
-降级资源的 `provider` 为 `demo`，质量审核会降低事实可追溯得分并提示重新运行。
+这样正式方案不会在外部搜索失败时静默混入虚假资源。资源检索失败会终止工作流并报错，由用户检查配置或网络后重试。
 
-生产环境建议：
-
-```env
-TAVILY_FALLBACK_TO_DEMO=false
-```
-
-正式方案不应在外部搜索失败时静默混入演示资源。
+> 注：`app/config.py` 中保留了 `tavily_fallback_to_demo` 字段，但当前实现未使用它，搜索失败一律抛错。
 
 ## 7. 异步 Tool Registry
 
@@ -120,7 +108,7 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 - 来源 URL 和检索时间写入。
 - `search_attractions` 在配置密钥时走 MCP 分支。
 - 异步 Tool 必须通过 `ainvoke` 调用。
-- 未配置密钥时图可以使用演示资源完成回归测试。
+- 未配置密钥时抛出 `MCPToolError`。
 
 ## 9. 后续增强
 
@@ -130,4 +118,3 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 4. 把来源存入 PostgreSQL，记录方案版本与证据关系。
 5. 对外部文本做 Prompt Injection 检测。
 6. 接入地图 API 验证真实坐标和交通时间。
-

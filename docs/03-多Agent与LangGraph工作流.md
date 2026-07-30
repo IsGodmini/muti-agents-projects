@@ -4,146 +4,141 @@
 
 本项目对几个容易混淆的概念做如下约定：
 
-- Agent：对一个业务目标负责，能够读取状态、做判断并选择工具。
-- Graph Node：LangGraph 中可执行的函数。一个 Agent 可以映射为一个或多个节点。
-- Tool：具有明确参数和结果的确定性动作。
-- Skill：某类任务的业务做法与约束，可被 Agent 复用。
-- State：整个策划线程共享的结构化上下文。
+- Agent：对一个业务目标负责，能够读取状态、做判断并调用工具。
+- Graph Node：LangGraph 中可执行的函数。一个 Agent 映射为一个节点。
+- Tool：具有明确参数和结果的确定性动作，通过 Tool Registry 注册。
+- State：整个策划线程共享的结构化上下文（`PlanningState`）。
 
-项目避免让多个 Agent 无限制互相聊天，而是使用有向状态图建立可预测的执行顺序。
+项目避免让多个 Agent 无限制互相聊天，而是使用有向状态图建立可预测的执行顺序。每个节点直接绑定自己需要的 Tools，不存在中间 Skill 调度层。
 
-## 2. Agent 分工
+## 2. 节点分工
 
-| Agent | 主要职责 | 典型输入 | 典型输出 |
+| 节点 | 主要职责 | 典型输入 | 典型输出 |
 | --- | --- | --- | --- |
-| 需求分析 Agent | 解析用户目标和约束 | 原始需求 | 标准化需求、缺失项 |
-| 任务规划 Agent | 拆分策划任务 | 标准化需求 | 执行计划 |
-| 资源研究 Agent | 检索候选资源 | 目的地、偏好 | 景点等候选项 |
-| 行程设计 Agent | 组合每日活动 | 候选资源、天数 | 初版行程 |
-| 路线优化 Agent | 减少折返并满足时间约束 | 初版行程、坐标 | 优化后行程 |
-| 成本 Agent | 计算总成本和预算差异 | 行程、人数、预算 | 成本明细 |
-| 质检 Agent | 检查事实、冲突和风险 | 完整方案 | 问题清单、结论 |
-| 交付 Agent | 汇总客户可读内容 | 已批准方案 | 摘要、营销内容、海报任务 |
-
-这些名称表达业务职责；具体代码可能将相邻职责合并为一个节点，以保持演示项目的可维护性。
+| parse_requirements | 解析用户目标和约束 | PlanRequest | 需求完整性判断 |
+| retrieve_resources | 检索并充实候选资源 | 目的地、主题、人群 | ResourceCandidate[] |
+| plan_itinerary | 估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵 |
+| validate_constraints | 检查每日跨度等硬性约束 | 行程 | ConstraintReport |
+| repair_plan | 约束失败时搜索替代资源 | 问题清单 | 补充后的资源 |
+| calculate_quote | 估算成本并计算售价 | 行程、人数、预算 | Quote |
+| quality_review | 多维度质量评分 | 完整方案 | QualityReport |
+| approval_gate | 人工审批中断 | 方案 + 质量报告 | 审批决定 |
+| prepare_poster | 生成海报视觉资产 | 方案 Brief | 海报资产 |
+| finalize_delivery | 存档版本与审批记录 | 已批准方案 | 持久化结果 |
 
 ## 3. 状态机
 
 ```mermaid
 flowchart TD
-    S["START"] --> N["normalize_request"]
-    N --> R["research_resources"]
-    R --> I["design_itinerary"]
-    I --> O["optimize_route"]
-    O --> C["calculate_cost"]
+    S["START"] --> P["parse_requirements"]
+    P --> R["retrieve_resources"]
+    R --> I["plan_itinerary"]
+    I --> V["validate_constraints"]
+    V -->|通过| C["calculate_quote"]
+    V -->|失败且可重试| RP["repair_plan"]
+    V -->|超过重试上限| F["mark_failed"]
+    RP --> I
     C --> Q["quality_review"]
-    Q -->|通过| H["human_approval"]
-    Q -->|需返工| I
-    H -->|批准| D["prepare_delivery"]
-    H -->|驳回| X["record_rejection"]
+    Q --> A["approval_gate (interrupt)"]
+    A -->|批准| PO["prepare_poster"]
+    A -->|驳回| X["mark_rejected"]
+    PO --> D["finalize_delivery"]
     D --> E["END"]
+    F --> E
     X --> E
 ```
 
-为避免死循环，返工路径需要累计尝试次数，并在超过阈值后转人工处理。
+`repair_plan → plan_itinerary` 构成返工环路，由 `retry_count` 限制最多 2 次，超过后转入 `mark_failed`，避免死循环。
 
 ## 4. `PlanningState`
 
-共享状态通常包含以下类别：
+共享状态定义在 `app/agents/state.py`：
 
 ```python
 class PlanningState(TypedDict, total=False):
     thread_id: str
-    request: dict
-    normalized_request: dict
-    resources: list[dict]
-    itinerary: list[dict]
-    route_summary: dict
-    cost_summary: dict
-    quality_report: dict
-    approval: dict
-    delivery: dict
-    errors: list[dict]
+    plan_id: str
+    request: PlanRequest
+    requirements_complete: bool
+    missing_fields: list[str]
+    resources: list[ResourceCandidate]
+    resource_search_provider: str
+    route_matrix: dict[str, int]
+    itinerary: list[ItineraryDay]
+    constraint_report: ConstraintReport
+    quote: Quote
+    quality_report: QualityReport
+    approval: dict[str, Any]
+    poster_brief: PosterBrief
+    poster_asset: dict[str, str]
+    current_stage: str
     retry_count: int
+    errors: list[str]
 ```
 
 设计原则：
 
 - 节点只写入自己负责的字段。
-- 字段尽量是可校验的结构化对象，而不是大段自由文本。
-- 原始输入与标准化结果同时保留，便于审计。
-- 错误作为状态的一部分传递，使路由函数可以决定重试、降级或终止。
+- 字段都是可校验的 Pydantic 对象，而不是大段自由文本。
+- 错误作为状态的一部分传递，使路由函数可以决定重试或终止。
 
 ## 5. 条件边
 
-条件边将业务决策从 Prompt 中抽离，例如：
+两个条件路由函数都是确定性 Python 逻辑，便于单元测试：
 
-- 质检通过：进入人工审批。
-- 质检失败且可修复：回到行程设计或成本计算。
-- 超过最大返工次数：升级给人工处理。
-- 审批通过：生成交付物。
-- 审批驳回：记录原因并结束，或根据策略进入修改流程。
+- `constraint_route`：校验通过 → `calculate_quote`；失败且 `retry_count < 2` → `repair_plan`；否则 → `mark_failed`。
+- `approval_route`：批准 → `prepare_poster`；驳回 → `mark_rejected`。
 
-路由函数应是确定性的 Python 逻辑，便于单元测试。
+业务决策从 Prompt 中抽离到路由函数，模型只负责生成内容，不负责流程控制。
 
 ## 6. 人工审批的中断与恢复
 
 LangGraph 的 `interrupt` 用于把当前状态暂停在审批关口：
 
-1. 图执行到审批节点。
-2. 节点返回包含方案摘要、预算和风险的审批载荷。
-3. checkpoint 保存当前线程状态。
-4. API 返回 `approval_required` 和 `thread_id`。
-5. 审核人员提交决定。
-6. API 使用 `Command(resume=...)` 恢复同一线程。
+1. 图执行到 `approval_gate`。
+2. 节点调用 `interrupt(...)`，抛出包含方案 ID 和质量报告的审批载荷。
+3. checkpointer 保存当前线程状态。
+4. CLI 展示方案并等待用户输入。
+5. 用户提交决定（批准/驳回）。
+6. CLI 使用 `Command(resume={"approved": ...})` 恢复同一线程。
 
-演示版本使用 `MemorySaver`，因此进程重启后状态会丢失。生产环境应改用持久化 checkpoint，并保证 `thread_id` 在租户内唯一。
+当前使用 `MemorySaver`，进程重启后状态会丢失。生产环境应改用持久化 checkpoint，并保证 `thread_id` 唯一。
 
 ## 7. 节点实现约束
 
 一个合格节点应具备：
 
 - 明确的输入字段和输出字段。
-- 输入缺失时的错误信息。
-- 对模型输出进行 Pydantic 校验。
-- 对 Tool 调用设置超时和最大次数。
-- 不在节点中直接隐藏高风险外部写入。
-- 日志中包含 thread_id、node_name 和耗时。
+- 对模型输出进行 Pydantic 校验（`ModelGateway.structured_completion`）。
+- 对 Tool 调用区分同步 `invoke` 与异步 `ainvoke`。
+- LLM 调用设置独立超时，失败后降级或抛出异常。
+- 不在节点中硬编码业务数据。
 
 示例结构：
 
 ```python
-def calculate_cost_node(state: PlanningState) -> dict:
-    result = tool_registry.invoke(
-        "calculate_product_cost",
-        itinerary=state["itinerary"],
-        travelers=state["normalized_request"]["travelers"],
+async def calculate_quote(state: PlanningState) -> dict:
+    breakdown = await gateway.structured_completion(
+        system_prompt=COST_ESTIMATION_SYSTEM,
+        user_prompt=...,
+        schema=CostBreakdown,
     )
-    return {"cost_summary": result}
+    quote = tool_registry.invoke("calculate_product_cost", {...})
+    return {"quote": quote, "current_stage": "quote_calculated"}
 ```
 
 ## 8. 重试与幂等
 
-- 模型生成：可以重试，但每次应记录模型、Prompt 版本和失败原因。
-- 查询工具：通常可安全重试。
-- 计算工具：保证相同输入产生相同结果。
-- 保存版本：使用 `plan_id + version` 或幂等键去重。
-- 对外发布：默认禁止自动重试，必须确认上次执行结果。
+- 模型生成：可以重试，结构化输出失败时降级到确定性逻辑或抛出异常。
+- 查询工具（search_attractions）：可安全重试。
+- 计算工具（route_matrix、product_cost）：相同输入产生相同结果。
+- 保存版本：使用 `plan_id + version` 自增，快照不可变。
 
-## 9. 如何增加一个 Agent
+## 9. 如何增加一个节点
 
-1. 定义业务职责和不能做的事情。
-2. 在 State 中增加最小必要字段。
-3. 编写节点函数并注册允许使用的 Tools/Skills。
-4. 为成功、失败和超时增加条件边。
-5. 编写节点单测和图路径测试。
-6. 在架构页和本文档中更新执行流程。
-
-## 10. 当前实现边界
-
-- ✅ 已有 LangGraph 图、共享状态、条件路由和审批恢复。
-- ✅ 已有确定性的演示节点，便于无模型环境测试。
-- 🟡 模型网关已经存在，但尚未全面替代演示节点逻辑。
-- 🟡 checkpoint 当前为内存实现。
-- ⬜ 多租户分布式执行、持久化 checkpoint 和节点级追踪属于生产化工作。
-
+1. 定义业务职责和输入输出字段。
+2. 在 `PlanningState` 中增加最小必要字段。
+3. 编写节点函数，直接调用所需的 Tools / LLM。
+4. 在 `build_planning_graph` 中注册节点和边。
+5. 为成功、失败和超时增加条件边。
+6. 编写节点级测试（Mock LLM 与 Tool）。
