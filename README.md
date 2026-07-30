@@ -1,6 +1,6 @@
-# TripOps AI · 多 Agent 文旅产品智能策划平台
+# TripOps AI · 多 Agent 旅行策划助手
 
-面向旅行社产品经理的命令行智能策划工具。通过自然语言交互，自动完成资源检索、行程规划、约束校验、成本核算和质量审核。
+面向个人用户的命令行智能旅行策划工具。回答几个问题，自动完成资源搜索、路线优化、行程编排、成本估算和质量检查。
 
 ## 快速开始
 
@@ -16,37 +16,49 @@ cp .env.example .env
 ./start.sh
 ```
 
+## 使用示例
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TripOps AI · 文旅产品智能策划
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▸ 基础信息
+  目的地 [杭州]: 成都
+  产品类型: 1.亲子旅行 2.研学旅行 3.企业团建 4.银龄慢游
+  请选择 [1]: 1
+  ...
+
+▸ 补充信息
+  还有其他需求或特殊情况吗？: 孩子对熊猫很感兴趣，一定要去大熊猫基地
+
+▸ 需求确认 → 多 Agent 工作流自动执行 → 输出完整方案 → 交互审批
+```
+
 ## 技术栈
 
 | 分层 | 技术 |
 |---|---|
 | Agent 编排 | LangGraph（条件路由、interrupt 审批、重试） |
 | LLM | 火山引擎 Ark（OpenAI-compatible） |
-| 搜索 | Tavily Remote MCP（Streamable HTTP） |
+| 搜索 | Tavily Remote MCP（实时网页搜索） |
 | 路线优化 | Google OR-Tools |
-| API | FastAPI + Uvicorn |
-| 持久化 | JSON 文件存储（方案版本、审批记录） |
-| 基础设施 | Docker Compose（PostgreSQL + PostGIS + Redis + MinIO） |
+| API | FastAPI（可选启动） |
+| 持久化 | JSON 文件存储 |
 
 ## 项目结构
 
 ```
 ├── cli.py                  # CLI 入口
 ├── app/
-│   ├── config.py           # 配置
-│   ├── main.py             # FastAPI
-│   ├── agents/             # LangGraph 工作流
-│   │   ├── graph.py        # 12 节点状态图
-│   │   ├── state.py        # 状态定义
-│   │   └── prompts.py      # LLM 提示词
-│   ├── api/routes.py       # API 路由
+│   ├── agents/             # LangGraph 工作流 + 提示词
 │   ├── models/schemas.py   # Pydantic Schema
-│   ├── services/           # 外部服务适配器
+│   ├── services/           # LLM / MCP / 持久化适配器
 │   ├── skills/loader.py    # Skill 加载器
-│   └── tools/              # Tool Registry
-├── skills/                 # 7 个业务 Skill 定义
-├── tests/                  # 测试
-├── infra/                  # PostgreSQL 初始化
+│   └── tools/              # Tool Registry + 领域工具
+├── skills/                 # 7 个业务 Skill（含质量门禁）
+├── tests/                  # 9 个测试
+├── infra/                  # PostgreSQL 初始化（规划）
 └── docs/                   # 设计文档
 ```
 
