@@ -17,9 +17,6 @@ class PlanningState(TypedDict, total=False):
     thread_id: str
     plan_id: str
     request: PlanRequest
-    selected_skill: str
-    selected_skill_gates: dict[str, Any]
-    selected_skill_instructions: str
     requirements_complete: bool
     missing_fields: list[str]
     resources: list[ResourceCandidate]

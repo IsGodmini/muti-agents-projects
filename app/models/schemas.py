@@ -146,12 +146,6 @@ class PlanRunResponse(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class SkillSummary(BaseModel):
-    name: str
-    version: str
-    description: str
-    allowed_tools: list[str]
-    approval_required: bool
 
 
 class ToolSummary(BaseModel):

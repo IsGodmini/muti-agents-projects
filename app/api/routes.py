@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter
@@ -14,10 +13,8 @@ from app.models.schemas import (
     PlanRequest,
     PlanRunResponse,
     PlanStatus,
-    SkillSummary,
     ToolSummary,
 )
-from app.skills.loader import SkillRegistry
 
 # Ensure domain tools are registered.
 from app.tools import travel as _travel_tools  # noqa: F401
@@ -26,9 +23,6 @@ from app.tools.registry import tool_registry
 router = APIRouter()
 graph = build_planning_graph()
 settings = get_settings()
-skill_registry = SkillRegistry(Path(settings.skills_directory))
-skill_registry.load_all()
-
 
 @router.get("/health")
 def health() -> dict[str, str | bool]:
@@ -43,11 +37,6 @@ def health() -> dict[str, str | bool]:
             and settings.tavily_api_key.get_secret_value().strip()
         ),
     }
-
-
-@router.get("/skills", response_model=list[SkillSummary])
-def list_skills() -> list[SkillSummary]:
-    return skill_registry.summaries()
 
 
 @router.get("/tools", response_model=list[ToolSummary])
