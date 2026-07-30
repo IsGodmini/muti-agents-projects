@@ -1,94 +1,40 @@
 services:
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    working_dir: /app
-    command: npm run dev
-    volumes:
-      - .:/app
-      - frontend_node_modules:/app/node_modules
-    ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-    depends_on:
-      - api
-
   api:
     build:
-      context: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      context: .
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
     volumes:
-      - ./backend:/app
+      - ./data:/app/data
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       TAVILY_SEARCH_ENABLED: ${TAVILY_SEARCH_ENABLED:-true}
       TAVILY_MCP_URL: ${TAVILY_MCP_URL:-https://mcp.tavily.com/mcp}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-advanced}
       TAVILY_SEARCH_TIMEOUT_SECONDS: ${TAVILY_SEARCH_TIMEOUT_SECONDS:-30}
-      TAVILY_FALLBACK_TO_DEMO: ${TAVILY_FALLBACK_TO_DEMO:-true}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
 
-  worker:
-    build:
-      context: ./backend
-    command: celery -A app.tasks.celery_app worker -l INFO -Q text_fast_queue,reasoning_queue,vision_queue,image_queue
-    volumes:
-      - ./backend:/app
-    environment:
-      TAVILY_SEARCH_ENABLED: ${TAVILY_SEARCH_ENABLED:-true}
-      TAVILY_MCP_URL: ${TAVILY_MCP_URL:-https://mcp.tavily.com/mcp}
-      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
-      TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-advanced}
-      TAVILY_SEARCH_TIMEOUT_SECONDS: ${TAVILY_SEARCH_TIMEOUT_SECONDS:-30}
-      TAVILY_FALLBACK_TO_DEMO: ${TAVILY_FALLBACK_TO_DEMO:-true}
-    depends_on:
-      - redis
-      - postgres
+  # 规划中的持久化层：当前应用使用 JSON 文件存储，尚未连接数据库。
+  # 需要 PostGIS/pgvector 时取消注释，并参见 infra/postgres/init.sql。
+  # postgres:
+  #   build:
+  #     context: ./infra/postgres
+  #   environment:
+  #     POSTGRES_DB: tripops
+  #     POSTGRES_USER: tripops
+  #     POSTGRES_PASSWORD: tripops
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U tripops -d tripops"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
 
-  postgres:
-    build:
-      context: ./infra/postgres
-    environment:
-      POSTGRES_DB: tripops
-      POSTGRES_USER: tripops
-      POSTGRES_PASSWORD: tripops
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tripops -d tripops"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: tripops
-      MINIO_ROOT_PASSWORD: tripops-secret
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-
-volumes:
-  frontend_node_modules:
-  postgres_data:
-  minio_data:
+# volumes:
+#   postgres_data:
