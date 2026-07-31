@@ -675,13 +675,20 @@ async def prepare_poster(state: PlanningState) -> dict:
     settings = get_settings()
     service = PosterService(settings)
 
+    # 封面：整体规划视角（目的地 + 产品名 + 必去地标/主题）
+    cover_elements = ["目的地标志性景观", "旅行氛围"]
+    if request.must_visit:
+        cover_elements.insert(0, request.must_visit[0][:12])
+    elif request.themes:
+        cover_elements.insert(0, request.themes[0][:12])
+
     cover_brief = PosterBrief(
         destination=request.destination,
         product_theme=request.title,
         target_audience=request.target_audience,
         visual_style="自然、明亮、具有层次的编辑插画风",
         primary_colors=["湖水绿", "暖金色", "宣纸白"],
-        visual_elements=["目的地标志性景观", "旅行氛围"],
+        visual_elements=cover_elements,
         negative_elements=["文字", "Logo", "二维码", "水印"],
         aspect_ratio="3:4",
     )
