@@ -2,7 +2,7 @@
 
 ## 1. 设计原则
 
-Tool 回答"系统能执行什么动作"。本项目不再使用独立的 Skill 调度层，而是让每个 LangGraph 节点直接绑定自己需要的 Tools。这样工具保持稳定，节点职责清晰，权限审计和 Mock 测试都更简单。
+Tool 回答"系统能执行什么动作"。本项目不使用独立的 Skill 调度层，而是让每个 LangGraph 节点直接绑定自己需要的 Tools。这样工具保持稳定，节点职责清晰，权限审计和 Mock 测试都更简单。
 
 Agent 节点不直接导入基础设施客户端，而是通过 Tool Registry 查找允许调用的工具。
 
@@ -34,18 +34,23 @@ Registry 同时提供：
 - `invoke`：调用同步工具。
 - `ainvoke`：调用异步工具（如 MCP 网络调用）。
 
-若错误地用 `invoke` 调用异步工具，Registry 会立即报错，避免未等待的协程进入工作流。
+若错误地用 `invoke` 调用异步工具，Registry 会立即报错，避免未等待的协程进入工作流。`ainvoke` 还会记录工具耗时与状态（PostgreSQL 可用时写入 `tool_invocations` 表）。
 
-## 3. 当前工具清单
+## 3. 当前工具清单（11 个）
 
-| Tool | 作用 | 风险 | 类型 |
-| --- | --- | --- | --- |
-| `search_attractions` | 通过 Tavily Remote MCP 检索目的地网页资源 | READ_ONLY | 异步 |
-| `calculate_route_matrix` | 校验并规范化 LLM 估算的交通时间矩阵 | READ_ONLY | 同步 |
-| `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并按天分组 | WRITE_INTERNAL | 同步 |
-| `calculate_product_cost` | 从 LLM 估算的成本明细计算售价与毛利 | READ_ONLY | 同步 |
-| `save_plan_version` | 保存不可变方案版本快照 | WRITE_INTERNAL | 同步 |
-| `submit_for_approval` | 持久化人工审批决定 | EXTERNAL_ACTION | 同步 |
+| Tool | 作用 | 风险 | 类型 | 分类 |
+| --- | --- | --- | --- | --- |
+| `search_attractions` | 通过 Tavily Remote MCP 检索目的地网页资源 | READ_ONLY | 异步 | mcp_search |
+| `search_poi_amap` | 高德 POI 结构化检索（坐标、评分、分类） | READ_ONLY | 异步 | geo_search |
+| `get_travel_time` | 高德两点公共交通/驾车时长 | READ_ONLY | 异步 | geo_compute |
+| `search_nearby_restaurants` | 高德周边餐饮检索（行程编排用） | READ_ONLY | 异步 | geo_search |
+| `search_hotels` | 高德周边酒店检索 | READ_ONLY | 异步 | geo_search |
+| `get_weather_forecast` | 和风天气逐日预报 | READ_ONLY | 异步 | geo_search |
+| `calculate_route_matrix` | 合并高德真实时长与 LLM 估算，构造完整交通矩阵 | READ_ONLY | 异步 | geo_compute |
+| `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并按天分组 | WRITE_INTERNAL | 同步 | optimization |
+| `calculate_product_cost` | 从 LLM 估算的成本明细计算售价与毛利 | READ_ONLY | 同步 | pricing |
+| `save_plan_version` | 保存不可变方案版本快照 | WRITE_INTERNAL | 同步 | versioning |
+| `submit_for_approval` | 持久化人工审批决定 | EXTERNAL_ACTION | 同步 | approval |
 
 风险分级：
 
@@ -57,13 +62,13 @@ Registry 同时提供：
 
 | 节点 | 绑定的工具 |
 | --- | --- |
-| retrieve_resources | search_attractions |
-| plan_itinerary | calculate_route_matrix、optimize_itinerary |
+| retrieve_resources | search_attractions、search_poi_amap |
+| plan_itinerary | calculate_route_matrix（内部调用高德真实时长）、optimize_itinerary、search_nearby_restaurants |
 | repair_plan | search_attractions |
 | calculate_quote | calculate_product_cost |
 | finalize_delivery | save_plan_version、submit_for_approval |
 
-其余节点（parse_requirements、validate_constraints、quality_review、approval_gate、prepare_poster）不经过 Tool Registry，分别由 LLM、确定性规则、人工中断或适配器完成。
+其余节点（parse_requirements、validate_constraints、quality_review、run_verification、review_repair、prepare_poster）不经过 Tool Registry，分别由 LLM、确定性规则或适配器完成。`get_travel_time`、`search_hotels`、`get_weather_forecast` 已注册，供后续节点直接接入（当前交通时长由 `calculate_route_matrix` 内部调用高德实现）。
 
 ## 5. 工具设计规范
 
@@ -75,6 +80,7 @@ Registry 同时提供：
 - 日志不记录密钥和敏感个人信息。
 - 写操作必须有幂等策略（如版本号自增）。
 - 不包含硬编码业务数据，所有输入来自真实搜索结果或 LLM 估算。
+- 外部数据（网页搜索）先经过 Guard 注入防护再进入上下文。
 
 ## 6. MCP 的位置
 
@@ -112,6 +118,7 @@ retrieve_resources 节点
 - [x] 节点只调用自己绑定的工具。
 - [x] 高风险动作（审批）要求人工确认。
 - [x] 写操作幂等（版本自增）。
-- [ ] 工具耗时、状态和错误码的结构化日志（生产化补充）。
-- [ ] 返回内容的 Prompt Injection 检测（生产化补充）。
-- [x] 外部资源标记来源和检索时间。
+- [x] 返回内容的 Prompt Injection 检测（`app/services/guard.py`，检索节点实时过滤）。
+- [x] 外部资源标记来源和检索时间（provider / source_url / retrieved_at）。
+- [x] 工具耗时、状态的结构化记录（PostgreSQL 可用时写入 `tool_invocations`）。
+- [ ] 工具错误码与审计导出（生产化补充）。

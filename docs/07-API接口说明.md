@@ -2,7 +2,7 @@
 
 ## 1. 两种使用方式
 
-TripOps AI 的主入口是对话式 CLI，同时提供一个可选的 FastAPI REST 接口用于程序化调用。
+TripOps AI 的主入口是对话式 CLI，同时提供 FastAPI REST 接口用于程序化调用。
 
 | 方式 | 入口 | 适用场景 |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ TripOps AI 的主入口是对话式 CLI，同时提供一个可选的 FastAPI RE
 ▸ 多 Agent 工作流执行 → 行程 / 报价 / 质量报告 → 确认存档
 ```
 
-- LLM 主导提问，无固定表单。
+- LLM 主导提问（chat_graph），无固定表单。
 - 用户随时可输入"开始吧 / 够了 / ok"等关键词立即执行。
 - 工作流结束后在 CLI 中确认（回车批准 / `n` 放弃）。
 
@@ -38,7 +38,9 @@ TripOps AI 的主入口是对话式 CLI，同时提供一个可选的 FastAPI RE
 | --- | --- | --- |
 | GET | `/api/v1/health` | 健康检查 |
 | GET | `/api/v1/tools` | 获取工具元数据 |
+| POST | `/api/v1/chat` | 对话式需求收集（多轮，thread_id 续聊） |
 | POST | `/api/v1/plans/run` | 创建并执行策划任务 |
+| POST | `/api/v1/plans/run/stream` | SSE 流式执行策划任务 |
 | POST | `/api/v1/plans/{thread_id}/approval` | 提交审批并恢复工作流 |
 
 ## 5. 健康检查
@@ -56,11 +58,13 @@ curl http://localhost:8000/api/v1/health
   "environment": "development",
   "mock_model_mode": false,
   "tavily_mcp_enabled": true,
-  "tavily_mcp_configured": true
+  "tavily_mcp_configured": true,
+  "weather_configured": false,
+  "database_configured": false
 }
 ```
 
-健康检查只返回 Tavily 是否已配置，不返回密钥。
+健康检查只返回各依赖是否已配置，不返回任何密钥。
 
 ## 6. 获取 Tools
 
@@ -68,9 +72,31 @@ curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/tools
 ```
 
-响应包含 Tool 名称、描述、风险等级和分类。
+响应包含 Tool 名称、描述、风险等级和分类（当前 11 个工具）。
 
-## 7. 运行策划任务
+## 7. 对话式需求收集
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "暑假想带孩子去北京玩几天"}'
+```
+
+响应示例：
+
+```json
+{
+  "thread_id": "9f8e...",
+  "reply": "听起来很棒！孩子多大了？大概玩几天？",
+  "ready": false,
+  "plan_request": null
+}
+```
+
+- `thread_id` 留空则新建会话；带上已返回的 `thread_id` 可继续多轮对话。
+- `ready=true` 时 `reply` 固定提示信息足够，`plan_request` 返回可提交给 `/plans/run` 的结构化需求。
+
+## 8. 运行策划任务
 
 请求体为完整的 `PlanRequest`：
 
@@ -88,15 +114,46 @@ curl -X POST http://localhost:8000/api/v1/plans/run \
     "target_margin_rate": 0.15,
     "target_audience": "8-12岁儿童及家长",
     "themes": ["传统文化", "博物启蒙"],
-    "constraints": ["连续乘车不超过90分钟"]
+    "pace": "moderate",
+    "hard_constraints": ["连续乘车不超过90分钟"],
+    "soft_preferences": ["希望少走路"]
   }'
 ```
 
-`product_type` 取值：`family_trip` / `study_tour` / `corporate_team_building` / `senior_friendly`。
+- `product_type` 取值：`family_trip` / `study_tour` / `corporate_team_building` / `senior_friendly`。
+- `pace` 取值：`intense` / `moderate` / `relaxed`。
+- 约束字段为 `hard_constraints` 与 `soft_preferences`（无独立的 `constraints` 字段）。
+- 响应包含 `thread_id`、状态和完整方案数据（行程、报价、质量报告）。`thread_id` 是后续恢复工作流的关键，调用方必须保存。
 
-响应包含 `thread_id`、状态和完整方案数据（行程、报价、质量报告）。`thread_id` 是后续恢复工作流的关键，调用方必须保存。
+工作流会同步执行到 `approval_gate` 节点，通过 `interrupt()` 暂停等待审批，返回 `waiting_approval`。
 
-## 8. 提交审批
+## 9. SSE 流式执行
+
+```bash
+curl -N -X POST http://localhost:8000/api/v1/plans/run/stream \
+  -H "Content-Type: application/json" \
+  -d '{ ... PlanRequest ... }'
+```
+
+事件格式（`text/event-stream`）：
+
+```text
+event: started
+data: {"thread_id":"...","plan_id":"..."}
+
+event: node_start
+data: {"node":"retrieve_resources"}
+
+event: node_end
+data: {"node":"retrieve_resources"}
+
+event: completed
+data: {"thread_id":"...","plan_id":"...","current_stage":"poster_generated"}
+```
+
+事件类型：`started`、`node_start`、`node_end`、`completed`、`error`。
+
+## 10. 提交审批
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/plans/{thread_id}/approval \
@@ -108,21 +165,25 @@ curl -X POST http://localhost:8000/api/v1/plans/{thread_id}/approval \
   }'
 ```
 
-批准后进入交付阶段（生成海报 + 存档）；驳回时记录原因并结束。
+- 批准后恢复工作流进入 `finalize_delivery`（生成海报/报告/PDF + 存档），响应状态 `delivered`。
+- 驳回时记录审批决定并结束，响应状态 `draft`。
 
-## 9. 状态语义
+## 11. 状态语义
+
+`PlanStatus` 枚举定义在 `app/models/schemas.py`：
 
 | 状态 | 含义 |
 | --- | --- |
+| `draft` | 草稿（审批被驳回） |
 | `running` | 工作流正在执行 |
 | `waiting_approval` | 已暂停，等待人工决定 |
+| `approved` | 已批准 |
 | `delivered` | 工作流已完成交付 |
-| `rejected` | 审批被驳回 |
 | `failed` | 节点执行失败 |
 
 当前接口在一次 HTTP 请求内同步执行到审批点。生产环境可改为异步任务并增加状态查询接口。
 
-## 10. 错误处理
+## 12. 错误处理
 
 常见 HTTP 状态：
 
@@ -132,12 +193,12 @@ curl -X POST http://localhost:8000/api/v1/plans/{thread_id}/approval \
 - `500`：未处理的内部错误。
 - `503`：模型、搜索等必要依赖不可用。
 
-## 11. 生产化接口建议
+## 13. 生产化接口建议
 
 当前仓库未完整实现以下能力：
 
 - OIDC/JWT 身份认证。
 - 租户级 RBAC。
 - `Idempotency-Key`。
-- 异步任务查询、取消和 SSE/WebSocket 进度流。
+- 异步任务查询、取消（SSE 进度流已实现）。
 - API 限流与审计导出。

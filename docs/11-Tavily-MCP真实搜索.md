@@ -22,6 +22,8 @@ sequenceDiagram
     T-->>G: ResourceCandidate[]
 ```
 
+`search_attractions` 定义在 `app/tools/travel.py`，内部复用 `TavilyMCPService`（`app/services/tavily_mcp.py`）。
+
 ## 3. 传输与鉴权
 
 - Transport：MCP Streamable HTTP。
@@ -30,7 +32,7 @@ sequenceDiagram
 - 鉴权：`Authorization: Bearer <TAVILY_API_KEY>`。
 - SDK：官方 `mcp` Python SDK 1.x 稳定版本。
 
-API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返回。
+API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返回（健康检查只返回 `tavily_mcp_configured` 布尔值）。
 
 ## 4. 搜索参数
 
@@ -41,7 +43,7 @@ API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返�
 主题：人文、美食；适合人群：亲子家庭
 ```
 
-调用参数：
+调用参数（`TavilyMCPService.search`）：
 
 ```json
 {
@@ -49,16 +51,22 @@ API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返�
   "topic": "general",
   "search_depth": "advanced",
   "max_results": 8,
-  "include_images": false,
+  "include_images": true,
   "include_raw_content": false
 }
 ```
 
-限制原始正文可以降低上下文体积和 Prompt Injection 风险。需要核对特定页面时，再单独增加 `tavily_extract` Tool。
+- `include_images=true`：搜索附带图片，供多模态资源充实节点结合图片判断景点实况。
+- 限制原始正文（`include_raw_content=false`）可以降低上下文体积和 Prompt Injection 风险。
 
 ## 5. 结果转换
 
-Tavily MCP 的搜索结果被转换为统一 `ResourceCandidate`：
+Tavily MCP 的搜索结果支持两种解析：
+
+- `parse_structured_results`：解析 MCP 返回的结构化 `results`（含 `images`）。
+- `parse_tavily_search_text`：解析文本信封格式（`Title/URL/Content` 正则），兼容不同 MCP 实现。
+
+统一转换为 `ResourceCandidate`：
 
 ```json
 {
@@ -72,24 +80,27 @@ Tavily MCP 的搜索结果被转换为统一 `ResourceCandidate`：
   "source_title": "成都武侯祠官方参观指南",
   "retrieved_at": "2026-07-30T10:00:00Z",
   "provider": "tavily_mcp",
-  "summary": "搜索摘要……"
+  "summary": "搜索摘要……",
+  "images": ["https://..."]
 }
 ```
 
 网页摘要不能被直接当成最终票价或库存。`opening_hours` 和价格等高时效字段由 LLM 充实估算，并标记为待官方确认。
 
-## 6. 失败处理
+## 6. 防护与失败处理
 
-项目不提供演示数据降级。以下情况 `search_attractions` 会明确抛出 `MCPToolError`：
+防护（`app/services/guard.py`）在检索节点实时生效：
 
-- 未配置 API Key 或 `TAVILY_SEARCH_ENABLED=false`。
-- MCP 初始化失败。
-- Tavily Tool 返回错误。
-- 搜索结果无法解析。
+- `scan_content` 检测 Prompt Injection 模式（指令覆盖、角色劫持、工具调用注入等）。
+- `is_safe_url` 按域名白名单/黑名单校验来源。
+- `filter_resources` 过滤风险资源，其余资源带来源继续进入 LLM 上下文。
 
-这样正式方案不会在外部搜索失败时静默混入虚假资源。资源检索失败会终止工作流并报错，由用户检查配置或网络后重试。
+失败处理分两层：
 
-> 注：`app/config.py` 中保留了 `tavily_fallback_to_demo` 字段，但当前实现未使用它，搜索失败一律抛错。
+- **工具层**：未配置 API Key 或 `TAVILY_SEARCH_ENABLED=false` 时，`search_attractions` 明确抛出 `MCPToolError`，不静默降级到演示数据。
+- **节点层**：`retrieve_resources` 与高德 POI 双路并行检索（`asyncio.gather(return_exceptions=True)`），单路失败记录警告，另一路结果继续使用；两路都失败时资源列表为空并由后续节点容错。
+
+> 早期版本在 `app/config.py` 中保留过 `tavily_fallback_to_demo` 字段，现已移除；`tests/conftest.py` 中设置的 `TAVILY_FALLBACK_TO_DEMO` 环境变量会被配置忽略，测试通过 Mock 工具实现离线运行。
 
 ## 7. 异步 Tool Registry
 
@@ -98,15 +109,15 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 - `invoke`：同步计算工具。
 - `ainvoke`：异步 MCP 或其他 I/O 工具。
 
-若错误地使用 `invoke` 调用异步 Tool，Registry 会立即报错，避免未等待的协程继续进入工作流。
+若错误地使用 `invoke` 调用异步 Tool，Registry 会立即报错，避免未等待的协程继续进入工作流。`ainvoke` 还会记录调用耗时与状态（PostgreSQL 可用时写入 `tool_invocations`）。
 
 ## 8. 测试
 
-自动化测试不会消耗 Tavily 配额。测试使用 Fake MCP Service 验证：
+自动化测试不会消耗 Tavily 配额（`tests/test_tools.py`）：
 
 - Tavily 文本结果解析。
 - 来源 URL 和检索时间写入。
-- `search_attractions` 在配置密钥时走 MCP 分支。
+- `search_attractions` 在配置密钥时走 MCP 分支（Fake Service）。
 - 异步 Tool 必须通过 `ainvoke` 调用。
 - 未配置密钥时抛出 `MCPToolError`。
 
@@ -116,5 +127,5 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 2. 增加 `tavily_extract` 二次提取开放时间与票价。
 3. 对 URL 去重并缓存短时间内的相同查询。
 4. 把来源存入 PostgreSQL，记录方案版本与证据关系。
-5. 对外部文本做 Prompt Injection 检测。
-6. 接入地图 API 验证真实坐标和交通时间。
+5. ~~对外部文本做 Prompt Injection 检测~~ ✅ 已实现（`app/services/guard.py`）。
+6. ~~接入地图 API 验证真实坐标和交通时间~~ ✅ 已实现（高德 POI / `get_travel_time`）。
