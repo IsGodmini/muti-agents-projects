@@ -1,9 +1,11 @@
-"""PDF report generator: travel-brochure style.
+"""PDF report generator: travel-brochure style, landscape pages.
 
-Layout model (all pages share the same size, text never overlaid on photos):
+Layout model (all pages share the same landscape size; text is never
+overlaid on photos; day pages alternate between full-width and
+full-height image panels; each page supports multiple photos):
 - Cover: full-bleed poster with a side info panel.
-- Day pages: alternating image/text panels (odd pages image-left,
-  even pages image-right); each page may contain one or more photos.
+- Day pages: layouts cycle 0 (image on top), 1 (image right),
+  2 (image left).
 - Summary page: budget table + data-provenance notes.
 """
 from __future__ import annotations
@@ -17,11 +19,13 @@ from app.models.schemas import ItineraryDay, PlanRequest, Quote
 
 logger = logging.getLogger(__name__)
 
-PAGE_WIDTH = 896
-PAGE_HEIGHT = 1152
+PAGE_WIDTH = 1152
+PAGE_HEIGHT = 896
 
 MARGIN = 48
-FOOTER_Y = 1068
+CONTENT_TOP = 116
+CONTENT_BOTTOM = 792
+FOOTER_Y = 812
 
 NAVY = (24, 58, 92)
 NAVY_LIGHT = (56, 102, 146)
@@ -82,7 +86,7 @@ def build_pdf_report(
     request: PlanRequest,
     itinerary: list[ItineraryDay],
     poster_path: str | None,
-    day_image_paths: list[str | None],
+    day_image_paths: list,
     output_path: str,
     quote: Quote | None = None,
 ) -> str:
@@ -128,11 +132,11 @@ def draw_footer(page: Image.Image, page_number: int, total_pages: int) -> None:
 def _draw_top_bar(draw: ImageDraw.ImageDraw, title: str, subtitle: str = "") -> None:
     draw.rectangle([0, 0, PAGE_WIDTH, 8], fill=GOLD)
     draw.rectangle([0, 8, PAGE_WIDTH, 96], fill=NAVY)
-    title_font = _load_font(38)
+    title_font = _load_font(36)
     sub_font = _load_font(18)
     draw.text((MARGIN, 26), title, font=title_font, fill=WHITE)
     if subtitle:
-        draw.text((MARGIN, 66), subtitle, font=sub_font, fill=(205, 216, 228))
+        draw.text((MARGIN + 260, 66), subtitle, font=sub_font, fill=(205, 216, 228))
 
 
 # ------------------------------------------------------------------
@@ -147,23 +151,23 @@ def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
     # Right side info panel (translucent white)
     panel = Image.new("RGBA", (PAGE_WIDTH, PAGE_HEIGHT), (0, 0, 0, 0))
     pd = ImageDraw.Draw(panel)
-    pd.rectangle([540, 0, PAGE_WIDTH, PAGE_HEIGHT], fill=(255, 255, 255, 235))
+    pd.rectangle([688, 0, PAGE_WIDTH, PAGE_HEIGHT], fill=(255, 255, 255, 235))
     page = Image.alpha_composite(page.convert("RGBA"), panel).convert("RGB")
 
     draw = ImageDraw.Draw(page)
-    title_font = _load_font(42)
+    title_font = _load_font(40)
     head_font = _load_font(20)
     body_font = _load_font(22)
     small_font = _load_font(16)
 
-    x = 572
+    x = 720
     y = 120
     draw.text((x, y), "TRIP PLANNER", font=head_font, fill=GOLD)
-    y += 46
+    y += 44
 
-    for line in _wrap_text(draw, request.title, title_font, 300)[:4]:
+    for line in _wrap_text(draw, request.title, title_font, 388)[:4]:
         draw.text((x, y), line, font=title_font, fill=INK)
-        y += 56
+        y += 54
     y += 12
 
     for label, value in (
@@ -173,23 +177,23 @@ def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
         ("客群", request.target_audience),
         ("主题", " / ".join(request.themes) or "综合"),
     ):
-        draw.text((x, y), f"{label}", font=head_font, fill=GOLD)
+        draw.text((x, y), label, font=head_font, fill=GOLD)
         y += 28
         draw.text((x, y), value, font=body_font, fill=INK)
         y += 44
 
-    draw.line([(x, y), (x + 300, y)], fill=LIGHT_LINE, width=1)
+    draw.line([(x, y), (x + 388, y)], fill=LIGHT_LINE, width=1)
     y += 22
     draw.text((x, y), "TripOps AI · 智能旅行策划", font=small_font, fill=GRAY)
     return page
 
 
 # ------------------------------------------------------------------
-# Day pages (alternating layout, multi-image support)
+# Day pages (three layouts, multi-image support)
 # ------------------------------------------------------------------
 
 def build_day_page(day: ItineraryDay, images: list[str], layout: int) -> Image.Image:
-    """Brochure day page.
+    """Brochure day page (landscape).
 
     layout:
       0 = full-width image on top + text panel below
@@ -200,24 +204,23 @@ def build_day_page(day: ItineraryDay, images: list[str], layout: int) -> Image.I
     draw = ImageDraw.Draw(page)
     _draw_top_bar(draw, f"DAY {day.day}", day.theme)
 
-    content_top = 132
-    content_bottom = 1030
     gap = 24
+    content_w = PAGE_WIDTH - 2 * MARGIN
 
     if layout == 0:
         # Full-width image on top; text panel height adapts to content
-        text_h = _measure_text_height(draw, day, PAGE_WIDTH - 2 * MARGIN - 52)
-        text_h = max(260, min(text_h, 540))
-        img_box = (MARGIN, content_top, PAGE_WIDTH - MARGIN, content_bottom - text_h - gap)
-        txt_box = (MARGIN, img_box[3] + gap, PAGE_WIDTH - MARGIN, content_bottom)
+        text_h = _measure_text_height(draw, day, content_w - 52)
+        text_h = max(240, min(text_h, 520))
+        img_box = (MARGIN, CONTENT_TOP, PAGE_WIDTH - MARGIN, CONTENT_BOTTOM - text_h - gap)
+        txt_box = (MARGIN, img_box[3] + gap, PAGE_WIDTH - MARGIN, CONTENT_BOTTOM)
     else:
-        img_w = int((PAGE_WIDTH - 2 * MARGIN) * 0.58)
+        img_w = int(content_w * 0.56)
         if layout == 1:  # image right, text left
-            img_box = (PAGE_WIDTH - MARGIN - img_w, content_top, PAGE_WIDTH - MARGIN, content_bottom)
-            txt_box = (MARGIN, content_top, img_box[0] - gap, content_bottom)
+            img_box = (PAGE_WIDTH - MARGIN - img_w, CONTENT_TOP, PAGE_WIDTH - MARGIN, CONTENT_BOTTOM)
+            txt_box = (MARGIN, CONTENT_TOP, img_box[0] - gap, CONTENT_BOTTOM)
         else:  # image left, text right
-            img_box = (MARGIN, content_top, MARGIN + img_w, content_bottom)
-            txt_box = (img_box[2] + gap, content_top, PAGE_WIDTH - MARGIN, content_bottom)
+            img_box = (MARGIN, CONTENT_TOP, MARGIN + img_w, CONTENT_BOTTOM)
+            txt_box = (img_box[2] + gap, CONTENT_TOP, PAGE_WIDTH - MARGIN, CONTENT_BOTTOM)
 
     _paint_images_cover(page, images, img_box)
 
@@ -254,7 +257,7 @@ def _paint_images_cover(page: Image.Image, images: list[str], box: tuple[int, in
         draw.rectangle([x1, y1, x2 - 1, y2 - 1], outline=WHITE, width=3)
         return
 
-    cols = 2
+    cols = 3 if (x2 - x1) > 900 else 2
     rows = (len(available) + cols - 1) // cols
     cell_w = (x2 - x1) // cols
     cell_h = (y2 - y1) // rows
@@ -285,7 +288,7 @@ def _paint_itinerary_text(draw: ImageDraw.ImageDraw, day: ItineraryDay, box: tup
         # time
         draw.text((x + pad + 22, cursor_y), time_str, font=small_font, fill=GOLD)
         # title
-        draw.text((x + pad + 110, cursor_y), event.title[:24], font=event_font, fill=INK)
+        draw.text((x + pad + 110, cursor_y), event.title[:28], font=event_font, fill=INK)
         cursor_y += 30
 
         # description (up to 2 lines)
@@ -324,27 +327,24 @@ def build_summary_page(request: PlanRequest, quote: Quote | None) -> Image.Image
         draw.text((x, y), "预算明细（估算）", font=head_font, fill=NAVY)
         y += 44
 
-        col_x = (MARGIN + 24, MARGIN + 300, PAGE_WIDTH - MARGIN - 200)
+        col_x = (MARGIN + 24, MARGIN + 340, PAGE_WIDTH - MARGIN - 260)
         table_y = y
-        header_fill = NAVY
-        # header row
-        draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 44], fill=header_fill)
+        draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 44], fill=NAVY)
         draw.text((col_x[0] + 16, table_y + 10), "类别", font=body_font, fill=WHITE)
         draw.text((col_x[1] + 16, table_y + 10), "说明", font=body_font, fill=WHITE)
-        draw.text((PAGE_WIDTH - MARGIN - 24 - 130, table_y + 10), "金额", font=body_font, fill=WHITE)
+        draw.text((PAGE_WIDTH - MARGIN - 24 - 140, table_y + 10), "金额", font=body_font, fill=WHITE)
         table_y += 44
 
         for index, item in enumerate(quote.items):
             row_fill = WHITE if index % 2 == 0 else (236, 240, 244)
             draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 40], fill=row_fill)
             draw.text((col_x[0] + 16, table_y + 10), item.category, font=body_font, fill=INK)
-            draw.text((col_x[1] + 16, table_y + 10), item.description[:16], font=small_font, fill=INK)
+            draw.text((col_x[1] + 16, table_y + 10), item.description[:24], font=small_font, fill=INK)
             amount = f"¥{item.amount:,}"
             aw = draw.textlength(amount, font=body_font)
             draw.text((PAGE_WIDTH - MARGIN - 24 - 24 - aw, table_y + 10), amount, font=body_font, fill=INK)
             table_y += 40
 
-        # total row
         draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 46], fill=GOLD)
         draw.text((col_x[0] + 16, table_y + 10), "合计", font=body_font, fill=INK)
         total = f"¥{quote.total_cost:,}"
@@ -357,13 +357,13 @@ def build_summary_page(request: PlanRequest, quote: Quote | None) -> Image.Image
             f"   ·   毛利率: {quote.margin_rate:.1%}"
         )
         draw.text((x, table_y), summary_lines, font=body_font, fill=INK)
-        table_y += 56
+        table_y += 52
     else:
         draw.text((x, y), "暂无报价数据", font=body_font, fill=GRAY)
         table_y = y + 60
 
     draw.text((x, table_y), "数据来源说明", font=head_font, fill=NAVY)
-    table_y += 44
+    table_y += 40
     notes = [
         "✅ 景点/攻略：Tavily 实时网页搜索 + 高德 POI（真实检索）",
         "✅ 天气：和风天气官方预报",
@@ -375,6 +375,6 @@ def build_summary_page(request: PlanRequest, quote: Quote | None) -> Image.Image
     ]
     for note in notes:
         draw.text((x, table_y), note, font=small_font, fill=GRAY)
-        table_y += 34
+        table_y += 32
 
     return page

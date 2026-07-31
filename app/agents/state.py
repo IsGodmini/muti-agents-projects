@@ -29,7 +29,7 @@ class PlanningState(TypedDict, total=False):
     approval: dict[str, Any]
     poster_brief: PosterBrief
     poster_asset: dict[str, str]
-    day_image_paths: list[str | None]
+    day_image_paths: list[list[str]]
     report_markdown: str
     report_path: str
     current_stage: str

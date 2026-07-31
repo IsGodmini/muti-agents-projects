@@ -26,7 +26,7 @@
 | quality_review | 多维度质量评分 | 完整方案 | QualityReport |
 | run_verification | 确定性可行性检查（8 项） | 行程 + 报价 | 验证得分 |
 | review_repair | 审核不达标时重排行程（重试环路） | 审核问题 | 重试计数 |
-| prepare_poster | 生成封面/分日海报视觉资产 | 方案 Brief | 海报资产 + 本地图片 |
+| prepare_poster | 生成封面海报 + 按天 1-3 张分日插图 | 方案 Brief | 海报资产 + 分日图片组 |
 | approval_gate | 人工审批中断（`interrupt()`） | 方案 + 审批载荷 | 审批决定 |
 | finalize_delivery | 生成报告/PDF、存档版本与审批记录 | 已批准方案 | 交付结果 |
 | mark_failed | 终止（约束/审核多次未通过） | 错误列表 | 失败状态 |
@@ -83,7 +83,7 @@ class PlanningState(TypedDict, total=False):
     approval: dict[str, Any]
     poster_brief: PosterBrief
     poster_asset: dict[str, str]
-    day_image_paths: list[str | None]
+    day_image_paths: list[list[str]]
     report_markdown: str
     report_path: str
     current_stage: str

@@ -664,7 +664,7 @@ async def _generate_and_download(
     local_path = None
     if "url" in result and not service.settings.mock_imagegen:
         try:
-            local_path = await service.download_image(result["url"], plan_id)
+            local_path = await service.download_image(result["url"], plan_id, name=label)
         except Exception:
             logger.warning("Download failed for %s", label, exc_info=True)
     return result, local_path
@@ -691,7 +691,54 @@ async def prepare_poster(state: PlanningState) -> dict:
         return {"poster_brief": cover_brief, "poster_asset": poster,
                 "day_image_paths": [], "current_stage": "poster_generated"}
 
-    day_briefs = [
+    days = state.get("itinerary", [])
+    day_image_paths: list[list[str]] = [[] for _ in days]
+
+    tasks: list[tuple[int, object]] = [(-1, _generate_and_download(service, cover_brief, state["plan_id"], "cover"))]
+    for day_index, day in enumerate(days):
+        count = _day_image_count(day)
+        briefs = _day_briefs(request, day, count)
+        for j, brief in enumerate(briefs):
+            label = f"day{day.day}" if j == 0 else f"day{day.day}-{j + 1}"
+            tasks.append((day_index, _generate_and_download(service, brief, state["plan_id"], label)))
+
+    results = await asyncio.gather(*(t for _, t in tasks), return_exceptions=True)
+
+    poster: dict[str, str] = {"status": "failed"}
+    for (day_index, _), res in zip(tasks, results, strict=True):
+        if isinstance(res, Exception):
+            logger.warning("Image task failed: %s", res)
+            continue
+        result, local_path = res
+        if day_index == -1:
+            poster = result
+            if local_path:
+                poster["local_path"] = local_path
+        elif local_path:
+            day_image_paths[day_index].append(local_path)
+
+    return {
+        "poster_brief": cover_brief,
+        "poster_asset": poster,
+        "day_image_paths": day_image_paths,
+        "current_stage": "poster_generated",
+    }
+
+
+def _day_image_count(day) -> int:
+    """Decide how many images a day needs based on its richness."""
+    active = [e for e in day.events if e.category not in ("break", "logistics")]
+    if len(active) >= 6:
+        return 3
+    if len(active) >= 4:
+        return 2
+    return 1
+
+
+def _day_briefs(request, day, count: int) -> list[PosterBrief]:
+    """Build one brief per image for a day; extra briefs highlight a landmark."""
+    active = [e for e in day.events if e.category not in ("break", "logistics")]
+    briefs = [
         PosterBrief(
             destination=request.destination,
             product_theme=day.theme,
@@ -700,41 +747,24 @@ async def prepare_poster(state: PlanningState) -> dict:
             primary_colors=["湖水绿", "暖金色", "宣纸白"],
             visual_elements=[request.destination, day.theme],
             negative_elements=["文字", "Logo", "二维码", "水印", "人物"],
-            aspect_ratio="3:4",
+            aspect_ratio="4:3",
         )
-        for day in state.get("itinerary", [])
     ]
-
-    tasks = [
-        _generate_and_download(service, cover_brief, state["plan_id"], "cover"),
-        *[
-            _generate_and_download(service, brief, f"{state['plan_id']}/day{i+1}", f"day{i+1}")
-            for i, brief in enumerate(day_briefs)
-        ],
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    poster: dict[str, str] = {"status": "failed"}
-    day_image_paths: list[str | None] = [None] * len(day_briefs)
-
-    for idx, res in enumerate(results):
-        if isinstance(res, Exception):
-            logger.warning("Image task %d failed: %s", idx, res)
-            continue
-        result, local_path = res
-        if idx == 0:
-            poster = result
-            if local_path:
-                poster["local_path"] = local_path
-        else:
-            day_image_paths[idx - 1] = local_path
-
-    return {
-        "poster_brief": cover_brief,
-        "poster_asset": poster,
-        "day_image_paths": day_image_paths,
-        "current_stage": "poster_generated",
-    }
+    for index in range(1, count):
+        highlight = active[index - 1].title[:8] if index - 1 < len(active) else day.theme
+        briefs.append(
+            PosterBrief(
+                destination=request.destination,
+                product_theme=f"{day.theme} · 亮点",
+                target_audience=request.target_audience,
+                visual_style="水彩插画风格，柔和色调，留白充足",
+                primary_colors=["湖水绿", "暖金色", "宣纸白"],
+                visual_elements=[request.destination, day.theme, highlight],
+                negative_elements=["文字", "Logo", "二维码", "水印", "人物"],
+                aspect_ratio="4:3",
+            )
+        )
+    return briefs
 
 
 # ------------------------------------------------------------------

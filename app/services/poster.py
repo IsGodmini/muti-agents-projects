@@ -67,12 +67,12 @@ class PosterService:
 
         return result
 
-    async def download_image(self, image_url: str, plan_id: str) -> str:
+    async def download_image(self, image_url: str, plan_id: str, name: str = "poster") -> str:
         """Download generated image and save it to the plan directory."""
         plan_dir = DATA_DIR / "plans" / plan_id
         plan_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(image_url.split("?")[0]).suffix or ".png"
-        local_path = plan_dir / f"poster{suffix}"
+        local_path = plan_dir / f"{name}{suffix}"
 
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(image_url)
