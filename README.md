@@ -30,6 +30,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 | LLM | 火山引擎 Ark（多模型分层：复杂推理 / 简单推理 / 多模态） |
 | 搜索 | Tavily Remote MCP + 高德 POI（双路实时检索） |
 | 地图与交通 | 高德开放平台（POI、真实交通时间） |
+| 天气 | 和风天气（逐日预报，行程编排参考） |
 | 路线优化 | Google OR-Tools |
 | 文生图 | ComfyUI（`MOCK_IMAGEGEN=true` 时使用预处理素材） |
 | 交付物 | Markdown 报告 + Pillow 合成 PDF（封面 + 分日插图页） |
@@ -51,17 +52,17 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 │   ├── models/schemas.py   # Pydantic Schema
 │   ├── services/           # guard / ranking / verifier / evaluation /
 │   │                       # renderer / pdf_report / amap / tavily_mcp /
-│   │                       # model_gateway / plan_store / poster
-│   └── tools/              # Tool Registry（6 个工具）
+│   │                       # model_gateway / plan_store / poster / weather
+│   └── tools/              # Tool Registry（7 个工具）
 ├── scripts/                # e2e 全流程、ComfyUI 连通性脚本
-├── tests/                  # 17 个单元测试 + 3 个可选集成测试（ComfyUI）
+├── tests/                  # 19 个单元测试 + 3 个可选集成测试（ComfyUI）
 └── docs/                   # 设计文档
 ```
 
 ## 测试
 
 ```bash
-uv run pytest -q -m "not integration"   # 17 个单元测试，无需外部服务
+uv run pytest -q -m "not integration"   # 19 个单元测试，无需外部服务
 uv run ruff check app tests cli.py      # 静态检查
 # 有 ComfyUI 环境时：uv run pytest -q   # 含 3 个集成测试
 ```

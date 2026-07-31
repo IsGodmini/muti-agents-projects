@@ -21,6 +21,7 @@ class PlanningState(TypedDict, total=False):
     missing_fields: list[str]
     resources: list[ResourceCandidate]
     resource_search_provider: str
+    weather_forecast: list[dict[str, Any]]
     route_matrix: dict[str, int]
     itinerary: list[ItineraryDay]
     constraint_report: ConstraintReport

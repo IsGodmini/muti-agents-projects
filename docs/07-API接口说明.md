@@ -58,7 +58,8 @@ curl http://localhost:8000/api/v1/health
   "environment": "development",
   "mock_model_mode": false,
   "tavily_mcp_enabled": true,
-  "tavily_mcp_configured": true
+  "tavily_mcp_configured": true,
+  "weather_configured": false
 }
 ```
 
@@ -70,7 +71,7 @@ curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/tools
 ```
 
-响应包含 Tool 名称、描述、风险等级和分类（当前 6 个工具）。
+响应包含 Tool 名称、描述、风险等级和分类（当前 7 个工具）。
 
 ## 7. 对话式需求收集
 

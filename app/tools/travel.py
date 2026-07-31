@@ -61,6 +61,28 @@ def _place_to_resource(place) -> ResourceCandidate:
     )
 
 
+class WeatherForecastInput(BaseModel):
+    city: str = Field(description="城市名称或 lng,lat 坐标")
+    days: int = Field(default=3, ge=1, le=7)
+
+
+@tool_registry.register(
+    name="get_weather_forecast",
+    description="Get multi-day weather forecast for travel planning via QWeather.",
+    category="geo_search",
+    risk_level=ToolRisk.READ_ONLY,
+    input_model=WeatherForecastInput,
+)
+async def get_weather_forecast(payload: WeatherForecastInput) -> list[dict]:
+    settings = get_settings()
+    if not settings.weather_api_key:
+        return []
+    from app.services.weather import WeatherClient
+
+    client = WeatherClient(settings.weather_api_key, settings.weather_base_url)
+    return await client.get_forecast(payload.city, days=payload.days)
+
+
 class SearchResourcesInput(BaseModel):
     destination: str
     themes: list[str] = Field(default_factory=list)

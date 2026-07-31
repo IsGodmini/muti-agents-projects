@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | parse_requirements | 解析用户目标和约束 | PlanRequest | 需求完整性判断 |
 | retrieve_resources | 双路检索、防护过滤、充实并排序候选资源 | 目的地、主题、人群 | ResourceCandidate[] |
-| plan_itinerary | 估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵 |
+| plan_itinerary | 获取天气、估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵、天气 |
 | validate_constraints | 检查空日程、时间冲突、每日跨度等硬性约束 | 行程 | ConstraintReport |
 | repair_plan | 约束失败时搜索替代资源 | 问题清单 | 补充后的资源 |
 | calculate_quote | 估算成本并计算售价 | 行程、人数、预算 | Quote |
@@ -77,6 +77,7 @@ class PlanningState(TypedDict, total=False):
     missing_fields: list[str]
     resources: list[ResourceCandidate]
     resource_search_provider: str
+    weather_forecast: list[dict[str, Any]]
     route_matrix: dict[str, int]
     itinerary: list[ItineraryDay]
     constraint_report: ConstraintReport

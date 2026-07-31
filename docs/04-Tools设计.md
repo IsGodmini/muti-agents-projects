@@ -36,12 +36,13 @@ Registry 同时提供：
 
 若错误地用 `invoke` 调用异步工具，Registry 会立即报错，避免未等待的协程进入工作流。`ainvoke` 用于所有异步 I/O 工具（如 MCP 网络调用）。
 
-## 3. 当前工具清单（6 个）
+## 3. 当前工具清单（7 个）
 
 | Tool | 作用 | 风险 | 类型 | 分类 |
 | --- | --- | --- | --- | --- |
 | `search_attractions` | 通过 Tavily Remote MCP 检索目的地网页资源 | READ_ONLY | 异步 | mcp_search |
 | `search_poi_amap` | 高德 POI 结构化检索（坐标、评分、分类） | READ_ONLY | 异步 | geo_search |
+| `get_weather_forecast` | 和风天气逐日预报（行程编排参考） | READ_ONLY | 异步 | geo_search |
 | `calculate_route_matrix` | 合并高德真实时长与 LLM 估算，构造完整交通矩阵 | READ_ONLY | 异步 | geo_compute |
 | `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并按天分组 | WRITE_INTERNAL | 同步 | optimization |
 | `calculate_product_cost` | 从 LLM 估算的成本明细计算售价与毛利 | READ_ONLY | 同步 | pricing |
@@ -58,7 +59,7 @@ Registry 同时提供：
 | 节点 | 绑定的工具 |
 | --- | --- |
 | retrieve_resources | search_attractions、search_poi_amap |
-| plan_itinerary | calculate_route_matrix（内部调用高德真实时长）、optimize_itinerary |
+| plan_itinerary | get_weather_forecast、calculate_route_matrix（内部调用高德真实时长）、optimize_itinerary |
 | repair_plan | search_attractions |
 | calculate_quote | calculate_product_cost |
 | finalize_delivery | submit_for_approval（版本快照由节点直接写入 PlanStore） |

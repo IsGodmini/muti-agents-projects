@@ -223,6 +223,13 @@ async def plan_itinerary(state: PlanningState) -> dict:
     request = state["request"]
     settings = get_settings()
 
+    weather = await tool_registry.ainvoke(
+        "get_weather_forecast",
+        {"city": request.destination, "days": min(request.days, 7)},
+    )
+    if weather:
+        logger.info("Weather forecast for %s: %d days", request.destination, len(weather))
+
     resource_ids = [r.id for r in resources]
     resource_map = {r.id: r for r in resources}
 
@@ -256,13 +263,23 @@ async def plan_itinerary(state: PlanningState) -> dict:
 
     if not settings.mock_model_mode:
         try:
-            days = await _generate_schedule(settings, request, optimized, resource_map)
-            return {"itinerary": days, "route_matrix": route_matrix, "current_stage": "itinerary_planned"}
+            days = await _generate_schedule(settings, request, optimized, resource_map, weather)
+            return {
+                "itinerary": days,
+                "route_matrix": route_matrix,
+                "weather_forecast": weather,
+                "current_stage": "itinerary_planned",
+            }
         except Exception:
             logger.warning("LLM schedule generation failed; using basic layout", exc_info=True)
 
     days = _basic_schedule(request, optimized, resource_map)
-    return {"itinerary": days, "route_matrix": route_matrix, "current_stage": "itinerary_planned"}
+    return {
+        "itinerary": days,
+        "route_matrix": route_matrix,
+        "weather_forecast": weather,
+        "current_stage": "itinerary_planned",
+    }
 
 
 async def _estimate_travel_times(settings, resources) -> dict[str, int]:
@@ -317,7 +334,7 @@ async def _estimate_travel_times(settings, resources) -> dict[str, int]:
     return travel_times
 
 
-async def _generate_schedule(settings, request, optimized, resource_map) -> list[ItineraryDay]:
+async def _generate_schedule(settings, request, optimized, resource_map, weather) -> list[ItineraryDay]:
     gateway = ModelGateway(settings)
     schedule_input = json.dumps(
         [
@@ -340,6 +357,17 @@ async def _generate_schedule(settings, request, optimized, resource_map) -> list
         ],
         ensure_ascii=False,
     )
+    weather_text = ""
+    if weather:
+        weather_text = "\n".join(
+            f"- {w.get('date', '?')}：{w.get('text_day', '未知')}，"
+            f"{w.get('temp_min', '?')}~{w.get('temp_max', '?')}℃，"
+            f"风力{w.get('wind_scale_day', '-')}级，湿度{w.get('humidity', '-')}%"
+            for w in weather
+        )
+    else:
+        weather_text = "暂无天气数据"
+
     batch = await gateway.structured_completion(
         model=settings.llm_model_complex,
         system_prompt=SCHEDULE_SYSTEM,
@@ -349,6 +377,7 @@ async def _generate_schedule(settings, request, optimized, resource_map) -> list
             f"天数：{request.days} 天 {request.nights} 晚\n"
             f"主题：{', '.join(request.themes)}\n"
             f"约束：{', '.join(request.constraints) or '无'}\n\n"
+            f"目的地天气（未来几天）：\n{weather_text}\n\n"
             f"已优化分组：\n{schedule_input}"
         ),
         schema=ScheduleBatch,
@@ -795,6 +824,7 @@ def finalize_delivery(state: PlanningState) -> dict:
         quote=state.get("quote"),
         quality_report=state.get("quality_report"),
         constraint_report=state.get("constraint_report"),
+        weather_forecast=state.get("weather_forecast"),
         poster_local_path=poster_local,
     )
     from app.services.plan_store import DATA_DIR

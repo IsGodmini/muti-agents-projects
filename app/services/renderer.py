@@ -16,6 +16,7 @@ def render_markdown_report(
     quote: Quote | None = None,
     quality_report: QualityReport | None = None,
     constraint_report: ConstraintReport | None = None,
+    weather_forecast: list[dict] | None = None,
     poster_local_path: str | None = None,
 ) -> str:
     """Render the complete travel plan as a Markdown document."""
@@ -38,6 +39,19 @@ def render_markdown_report(
     if request.must_visit:
         lines.append(f"| 必去 | {', '.join(request.must_visit)} |")
     lines.append("")
+
+    if weather_forecast:
+        lines.append("## 天气")
+        lines.append("")
+        lines.append("| 日期 | 天气 | 温度 | 风力 | 湿度 |")
+        lines.append("|---|---|---|---|---|")
+        for day in weather_forecast:
+            lines.append(
+                f"| {day.get('date', '?')} | {day.get('text_day', '未知')} | "
+                f"{day.get('temp_min', '?')}~{day.get('temp_max', '?')}℃ | "
+                f"{day.get('wind_scale_day', '-')}级 | {day.get('humidity', '-')}% |"
+            )
+        lines.append("")
 
     for day in itinerary:
         lines.append(f"## Day {day.day}: {day.theme}")

@@ -109,6 +109,8 @@ async def test_graph_runs_end_to_end_with_auto_review(monkeypatch) -> None:
     async def _mock_ainvoke(name, payload):
         if name in ("search_attractions", "search_poi_amap"):
             return TEST_RESOURCES
+        if name == "get_weather_forecast":
+            return [{"date": "2026-08-01", "text_day": "晴", "temp_max": 32, "temp_min": 25, "wind_scale_day": "3", "humidity": 60}]
         if name == "calculate_route_matrix":
             ids = payload.get("resource_ids", [])
             times = payload.get("travel_times", {})
@@ -169,6 +171,7 @@ async def test_graph_runs_end_to_end_with_auto_review(monkeypatch) -> None:
 
         assert result["current_stage"] == "delivered"
         assert result["constraint_report"].valid is True
+        assert result["weather_forecast"][0]["text_day"] == "晴"
         assert result["quote"].total_cost == 26000
         assert result["verification_score"] >= 60
         assert result["poster_asset"]["status"] == "generated"
@@ -187,6 +190,8 @@ async def test_graph_rejection_records_decision_and_ends(monkeypatch) -> None:
     async def _mock_ainvoke(name, payload):
         if name in ("search_attractions", "search_poi_amap"):
             return TEST_RESOURCES
+        if name == "get_weather_forecast":
+            return [{"date": "2026-08-01", "text_day": "晴", "temp_max": 32, "temp_min": 25, "wind_scale_day": "3", "humidity": 60}]
         if name == "calculate_route_matrix":
             ids = payload.get("resource_ids", [])
             times = payload.get("travel_times", {})

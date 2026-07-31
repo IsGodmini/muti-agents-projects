@@ -142,6 +142,42 @@ async def test_search_attractions_raises_without_api_key(
         )
 
 
+@pytest.mark.asyncio
+async def test_weather_forecast_returns_empty_without_key(monkeypatch) -> None:
+    monkeypatch.setattr(
+        travel,
+        "get_settings",
+        lambda: SimpleNamespace(weather_api_key=""),
+    )
+
+    result = await tool_registry.ainvoke("get_weather_forecast", {"city": "杭州", "days": 3})
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_weather_forecast_calls_weather_client(monkeypatch) -> None:
+    class FakeWeatherClient:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+        async def get_forecast(self, location: str, days: int) -> list[dict]:
+            assert location == "杭州"
+            assert days == 3
+            return [{"date": "2026-08-01", "text_day": "晴", "temp_max": 32, "temp_min": 25}]
+
+    monkeypatch.setattr(
+        travel,
+        "get_settings",
+        lambda: SimpleNamespace(weather_api_key="test-key", weather_base_url="https://devapi.qweather.com/v7"),
+    )
+    from app.services import weather as weather_module
+
+    monkeypatch.setattr(weather_module, "WeatherClient", FakeWeatherClient)
+
+    result = await tool_registry.ainvoke("get_weather_forecast", {"city": "杭州", "days": 3})
+    assert result[0]["text_day"] == "晴"
+
+
 def test_async_tool_requires_ainvoke() -> None:
     with pytest.raises(RuntimeError, match="asynchronous"):
         tool_registry.invoke(

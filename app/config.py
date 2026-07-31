@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com/v3"
 
+    weather_api_key: str = ""
+    weather_base_url: str = "https://devapi.qweather.com/v7"
+
 
 @lru_cache
 def get_settings() -> Settings:

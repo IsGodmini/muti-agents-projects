@@ -43,6 +43,7 @@ def health() -> dict[str, str | bool]:
             settings.tavily_api_key
             and settings.tavily_api_key.get_secret_value().strip()
         ),
+        "weather_configured": bool(settings.weather_api_key),
     }
 
 
