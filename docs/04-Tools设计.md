@@ -115,5 +115,4 @@ retrieve_resources 节点
 - [x] 写操作幂等（版本自增）。
 - [x] 返回内容的 Prompt Injection 检测（`app/services/guard.py`，检索节点实时过滤）。
 - [x] 外部资源标记来源和检索时间（provider / source_url / retrieved_at）。
-- [ ] 工具耗时、状态和错误码的结构化日志（生产化补充）。
-- [ ] 工具错误码与审计导出（生产化补充）。
+- [ ] 工具耗时、状态与错误码的结构化日志及审计导出（生产化补充）。

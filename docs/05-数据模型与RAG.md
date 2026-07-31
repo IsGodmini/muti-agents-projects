@@ -50,7 +50,7 @@ data/plans/{plan_id}/
   ├── v1.0.json        # 方案快照（不可变）
   ├── v2.0.json        # 新版本
   ├── approval.json    # 审批记录
-  ├── report.md        # Markdown 交付报告
+  ├── report.md        # Markdown 交付报告（行程概览/分日行程/约束校验/预算明细/质量评估）
   ├── report.pdf       # PDF 交付物（Pillow 合成）
   └── poster-*.png     # 海报 / 分日插图素材
 ```
