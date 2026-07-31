@@ -18,7 +18,6 @@
 
 | 节点 | 主要职责 | 典型输入 | 典型输出 |
 | --- | --- | --- | --- |
-| parse_requirements | 解析用户目标和约束 | PlanRequest | 需求完整性判断 |
 | retrieve_resources | 双路检索、防护过滤、充实并排序候选资源 | 目的地、主题、人群 | ResourceCandidate[] |
 | plan_itinerary | 获取天气、估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵、天气 |
 | validate_constraints | 检查空日程、时间冲突、每日跨度等硬性约束 | 行程 | ConstraintReport |
@@ -37,8 +36,7 @@
 
 ```mermaid
 flowchart TD
-    S["START"] --> P["parse_requirements"]
-    P --> R["retrieve_resources"]
+    S["START"] --> R["retrieve_resources"]
     R --> I["plan_itinerary"]
     I --> V["validate_constraints"]
     V -->|通过| C["calculate_quote"]
@@ -73,8 +71,6 @@ class PlanningState(TypedDict, total=False):
     thread_id: str
     plan_id: str
     request: PlanRequest
-    requirements_complete: bool
-    missing_fields: list[str]
     resources: list[ResourceCandidate]
     resource_search_provider: str
     weather_forecast: list[dict[str, Any]]

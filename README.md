@@ -26,7 +26,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 
 | 分层 | 技术 |
 |---|---|
-| Agent 编排 | LangGraph（14 节点、3 个条件路由、interrupt 审批） |
+| Agent 编排 | LangGraph（13 节点、3 个条件路由、interrupt 审批） |
 | LLM | 火山引擎 Ark（多模型分层：复杂推理 / 简单推理 / 多模态） |
 | 搜索 | Tavily Remote MCP + 高德 POI（双路实时检索） |
 | 地图与交通 | 高德开放平台（POI、真实交通时间） |
@@ -44,7 +44,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 ├── cli.py                  # 对话式 CLI 入口
 ├── app/
 │   ├── agents/
-│   │   ├── graph.py        # 策划工作流（14 节点）
+│   │   ├── graph.py        # 策划工作流（13 节点）
 │   │   ├── chat_graph.py   # 对话式需求收集图
 │   │   ├── prompts.py      # LLM 提示词
 │   │   └── state.py        # PlanningState / ChatState

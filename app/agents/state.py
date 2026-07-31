@@ -17,8 +17,6 @@ class PlanningState(TypedDict, total=False):
     thread_id: str
     plan_id: str
     request: PlanRequest
-    requirements_complete: bool
-    missing_fields: list[str]
     resources: list[ResourceCandidate]
     resource_search_provider: str
     weather_forecast: list[dict[str, Any]]

@@ -103,7 +103,7 @@ def _conversation_to_request(conv: PlannerConversation) -> dict:
         "avoid": conv.avoid,
         "hard_constraints": conv.hard_constraints,
         "soft_preferences": conv.soft_preferences,
-        "assumptions": conv.assumptions if hasattr(conv, "assumptions") else [],
+        "assumptions": conv.assumptions,
     }
 
 

@@ -206,11 +206,6 @@ class ToolSummary(BaseModel):
 # ---------- LLM structured-output schemas ----------
 
 
-class RequirementAnalysis(BaseModel):
-    requirements_complete: bool
-    missing_fields: list[str] = Field(default_factory=list)
-
-
 class EnrichedResourceInfo(BaseModel):
     index: int = Field(default=-1, description="资源在输入列表中的序号，从 0 开始")
     category: str
@@ -317,3 +312,4 @@ class PlannerConversation(BaseModel):
     transport_preferences: list[str] = Field(default_factory=list)
     hard_constraints: list[str] = Field(default_factory=list)
     soft_preferences: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list, description="Agent 做出的假设，需用户确认")

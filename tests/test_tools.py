@@ -27,7 +27,6 @@ def test_quote_tool_computes_from_provided_items() -> None:
         "calculate_product_cost",
         {
             "group_size": 30,
-            "days": 3,
             "target_margin_rate": 0.15,
             "budget_per_person": 1800,
             "cost_items": [

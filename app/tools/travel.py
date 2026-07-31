@@ -225,7 +225,6 @@ class OptimizeRouteInput(BaseModel):
         description="真实交通时间矩阵，格式 'id->id': minutes",
     )
     days: int = Field(ge=1, le=15)
-    max_daily_minutes: int = Field(default=480, ge=120, le=720)
 
 
 @tool_registry.register(
@@ -278,7 +277,6 @@ def optimize_itinerary(payload: OptimizeRouteInput) -> list[list[str]]:
 
 class QuoteInput(BaseModel):
     group_size: int = Field(ge=1, le=500)
-    days: int = Field(ge=1, le=15)
     target_margin_rate: float = Field(ge=0, le=0.8)
     budget_per_person: int = Field(ge=100)
     cost_items: list[QuoteItem] = Field(

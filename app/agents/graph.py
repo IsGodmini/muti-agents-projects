@@ -1,7 +1,6 @@
 """LangGraph 工作流：每个节点直接绑定所需的 Tools。
 
 节点 → Tools 绑定：
-  parse_requirements   → (LLM only)
   retrieve_resources   → search_attractions, (LLM enrichment)
   plan_itinerary       → calculate_route_matrix, optimize_itinerary, (LLM scheduling)
   validate_constraints → (deterministic)
@@ -30,7 +29,6 @@ from langgraph.types import interrupt
 from app.agents.prompts import (
     COST_ESTIMATION_SYSTEM,
     QUALITY_REVIEW_SYSTEM,
-    REQUIREMENT_ANALYSIS_SYSTEM,
     RESOURCE_ENRICHMENT_SYSTEM,
     SCHEDULE_SYSTEM,
     TRAVEL_TIME_SYSTEM,
@@ -47,7 +45,6 @@ from app.models.schemas import (
     QualityAssessment,
     QualityReport,
     QuoteItem,
-    RequirementAnalysis,
     ResourceEnrichmentBatch,
     ScheduleBatch,
     TravelTimeMatrix,
@@ -65,53 +62,6 @@ from app.tools import travel as _travel_tools  # noqa: F401
 from app.tools.registry import tool_registry
 
 logger = logging.getLogger(__name__)
-
-
-# ------------------------------------------------------------------
-# parse_requirements → LLM only
-# ------------------------------------------------------------------
-
-async def parse_requirements(state: PlanningState) -> dict:
-    request = state["request"]
-    settings = get_settings()
-
-    if not settings.mock_model_mode:
-        try:
-            gateway = ModelGateway(settings)
-            analysis = await gateway.structured_completion(
-                model=settings.llm_model_complex,
-                system_prompt=REQUIREMENT_ANALYSIS_SYSTEM,
-                user_prompt=(
-                    f"产品类型：{request.product_type.value}\n"
-                    f"标题：{request.title}\n"
-                    f"目的地：{request.destination}\n"
-                    f"天数：{request.days} 天 {request.nights} 晚\n"
-                    f"团队规模：{request.group_size} 人\n"
-                    f"预算：{request.budget_per_person} 元/人\n"
-                    f"目标人群：{request.target_audience}\n"
-                    f"主题：{', '.join(request.themes)}\n"
-                    f"约束：{', '.join(request.constraints) or '无'}"
-                ),
-                schema=RequirementAnalysis,
-            )
-            logger.info("LLM requirement analysis complete=%s", analysis.requirements_complete)
-            return {
-                "requirements_complete": analysis.requirements_complete,
-                "missing_fields": analysis.missing_fields,
-                "current_stage": "requirements_parsed",
-                "retry_count": 0,
-                "errors": [],
-            }
-        except Exception:
-            logger.warning("LLM requirement analysis failed", exc_info=True)
-
-    return {
-        "requirements_complete": True,
-        "missing_fields": [],
-        "current_stage": "requirements_parsed",
-        "retry_count": 0,
-        "errors": [],
-    }
 
 
 # ------------------------------------------------------------------
@@ -256,7 +206,6 @@ async def plan_itinerary(state: PlanningState) -> dict:
             "resource_ids": resource_ids,
             "distance_matrix": route_matrix,
             "days": request.days,
-            "max_daily_minutes": 480,
         },
     )
 
@@ -547,11 +496,17 @@ async def repair_plan(state: PlanningState) -> dict:
             )
             if alternatives:
                 existing_ids = {r.id for r in state.get("resources", [])}
-                new_resources = [r for r in alternatives if r.id not in existing_ids]
+                new_resources, guard_warnings = guard_filter_resources(
+                    [r for r in alternatives if r.id not in existing_ids],
+                    scan_source="repair_plan",
+                )
+                for w in guard_warnings:
+                    logger.warning("Guard: %s", w)
                 if new_resources:
+                    new_resources = score_resources(new_resources[:3], request)
                     return {
                         "retry_count": retry,
-                        "resources": list(state.get("resources", [])) + new_resources[:3],
+                        "resources": list(state.get("resources", [])) + new_resources,
                         "current_stage": "repairing",
                     }
         except Exception:
@@ -595,7 +550,7 @@ async def _llm_cost_estimation(settings, state):
     quote = tool_registry.invoke(
         "calculate_product_cost",
         {
-            "group_size": request.group_size, "days": request.days,
+            "group_size": request.group_size,
             "target_margin_rate": request.target_margin_rate,
             "budget_per_person": request.budget_per_person,
             "cost_items": [i.model_dump() for i in cost_items],
@@ -840,6 +795,7 @@ def finalize_delivery(state: PlanningState) -> dict:
         "quality_report": state["quality_report"].model_dump() if state.get("quality_report") else None,
         "poster_asset": state.get("poster_asset"),
         "verification_score": state.get("verification_score"),
+        "weather_forecast": state.get("weather_forecast"),
     }
     plan_store.save_version(state["plan_id"], "审批后生成最终交付版本", snapshot)
     approval = state.get("approval", {}) or {}
@@ -907,7 +863,6 @@ def mark_rejected(state: PlanningState) -> dict:
 
 def build_planning_graph(checkpointer: MemorySaver | None = None):
     builder = StateGraph(PlanningState)
-    builder.add_node("parse_requirements", parse_requirements)
     builder.add_node("retrieve_resources", retrieve_resources)
     builder.add_node("plan_itinerary", plan_itinerary)
     builder.add_node("validate_constraints", validate_constraints)
@@ -921,8 +876,7 @@ def build_planning_graph(checkpointer: MemorySaver | None = None):
     builder.add_node("finalize_delivery", finalize_delivery)
     builder.add_node("mark_failed", mark_failed)
     builder.add_node("mark_rejected", mark_rejected)
-    builder.add_edge(START, "parse_requirements")
-    builder.add_edge("parse_requirements", "retrieve_resources")
+    builder.add_edge(START, "retrieve_resources")
     builder.add_edge("retrieve_resources", "plan_itinerary")
     builder.add_edge("plan_itinerary", "validate_constraints")
     builder.add_conditional_edges("validate_constraints", constraint_route,

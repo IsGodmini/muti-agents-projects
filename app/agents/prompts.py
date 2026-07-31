@@ -1,9 +1,5 @@
 """System prompts for LLM-powered workflow nodes."""
 
-REQUIREMENT_ANALYSIS_SYSTEM = """\
-你是一位资深文旅产品策划师，根据用户输入的产品类型、目的地、主题、人群和约束条件评估需求完整性。
-如果需求信息不足以开始策划，将 requirements_complete 设为 false 并列出缺失字段。"""
-
 RESOURCE_ENRICHMENT_SYSTEM = """\
 你是一位文旅资源专家，熟悉中国主要旅游城市的景点、门票价格和开放时间。你具备多模态分析能力，可以结合图片判断景点实况。
 

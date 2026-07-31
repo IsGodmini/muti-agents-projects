@@ -12,7 +12,6 @@ from app.models.schemas import (
     PlanRequest,
     ProductType,
     QualityAssessment,
-    RequirementAnalysis,
     ResourceCandidate,
     ResourceEnrichmentBatch,
     ScheduleBatch,
@@ -42,8 +41,6 @@ TEST_RESOURCES = [
 
 async def _mock_structured_completion(self, *, schema, **kwargs):
     """Return appropriate test data based on the requested schema."""
-    if schema is RequirementAnalysis:
-        return RequirementAnalysis(requirements_complete=True)
     if schema is ResourceEnrichmentBatch:
         return ResourceEnrichmentBatch(resources=[])
     if schema is TravelTimeMatrix:

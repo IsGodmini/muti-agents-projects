@@ -64,7 +64,7 @@ Registry 同时提供：
 | calculate_quote | calculate_product_cost |
 | finalize_delivery | submit_for_approval（版本快照由节点直接写入 PlanStore） |
 
-其余节点（parse_requirements、validate_constraints、quality_review、run_verification、review_repair、prepare_poster）不经过 Tool Registry，分别由 LLM、确定性规则或适配器完成。
+其余节点（validate_constraints、quality_review、run_verification、review_repair、prepare_poster、approval_gate、mark_failed、mark_rejected）不经过 Tool Registry，分别由确定性规则、适配器或中断完成。
 
 ## 5. 工具设计规范
 

@@ -31,7 +31,6 @@ LLM 结构化输出专用模型：
 
 | 模型 | 用于节点 |
 | --- | --- |
-| `RequirementAnalysis` | parse_requirements |
 | `ResourceEnrichmentBatch` | retrieve_resources（资源充实，多模态） |
 | `TravelTimeMatrix` / `TravelTimePair` | plan_itinerary（交通估算） |
 | `ScheduleBatch` / `DailySchedule` / `ScheduledEvent` | plan_itinerary（行程编排） |
