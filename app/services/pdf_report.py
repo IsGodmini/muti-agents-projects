@@ -67,11 +67,15 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
     return lines
 
 
-def _fit_image(path: str, box_w: int, box_h: int) -> Image.Image:
+def _cover_image(path: str, box_w: int, box_h: int) -> Image.Image:
+    """Resize-and-crop so the image completely fills the box (no letterboxing)."""
     img = Image.open(path).convert("RGB")
-    ratio = min(box_w / img.width, box_h / img.height)
+    ratio = max(box_w / img.width, box_h / img.height)
     new_size = (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
-    return img.resize(new_size, Image.Resampling.LANCZOS)
+    img = img.resize(new_size, Image.Resampling.LANCZOS)
+    left = (new_size[0] - box_w) // 2
+    top = (new_size[1] - box_h) // 2
+    return img.crop((left, top, left + box_w, top + box_h))
 
 
 def build_pdf_report(
@@ -88,7 +92,7 @@ def build_pdf_report(
     for index, day in enumerate(itinerary):
         raw = day_image_paths[index] if index < len(day_image_paths) else None
         images = raw if isinstance(raw, list) else ([raw] if raw else [])
-        pages.append(build_day_page(day, images, day.day % 2 == 1))
+        pages.append(build_day_page(day, images, (day.day - 1) % 3))
 
     pages.append(build_summary_page(request, quote))
 
@@ -138,8 +142,7 @@ def _draw_top_bar(draw: ImageDraw.ImageDraw, title: str, subtitle: str = "") -> 
 def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
     page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), NAVY)
     if poster_path and Path(poster_path).exists():
-        bg = _fit_image(poster_path, PAGE_WIDTH, PAGE_HEIGHT)
-        page.paste(bg, ((PAGE_WIDTH - bg.width) // 2, (PAGE_HEIGHT - bg.height) // 2))
+        page.paste(_cover_image(poster_path, PAGE_WIDTH, PAGE_HEIGHT), (0, 0))
 
     # Right side info panel (translucent white)
     panel = Image.new("RGBA", (PAGE_WIDTH, PAGE_HEIGHT), (0, 0, 0, 0))
@@ -185,71 +188,81 @@ def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
 # Day pages (alternating layout, multi-image support)
 # ------------------------------------------------------------------
 
-def build_day_page(
-    day: ItineraryDay,
-    images: list[str],
-    image_left: bool,
-) -> Image.Image:
+def build_day_page(day: ItineraryDay, images: list[str], layout: int) -> Image.Image:
+    """Brochure day page.
+
+    layout:
+      0 = full-width image on top + text panel below
+      1 = full-height image on the right + text panel on the left
+      2 = full-height image on the left + text panel on the right
+    """
     page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), PAPER)
     draw = ImageDraw.Draw(page)
     _draw_top_bar(draw, f"DAY {day.day}", day.theme)
 
-    # Content area: 96..1068
+    content_top = 132
+    content_bottom = 1030
     gap = 24
-    img_w = 372
-    txt_w = PAGE_WIDTH - 2 * MARGIN - img_w - gap
-    top = 132
-    bottom = 1030
 
-    if image_left:
-        img_box = (MARGIN, top, MARGIN + img_w, bottom)
-        txt_box = (PAGE_WIDTH - MARGIN - txt_w, top, PAGE_WIDTH - MARGIN, bottom)
+    if layout == 0:
+        # Full-width image on top; text panel height adapts to content
+        text_h = _measure_text_height(draw, day, PAGE_WIDTH - 2 * MARGIN - 52)
+        text_h = max(260, min(text_h, 540))
+        img_box = (MARGIN, content_top, PAGE_WIDTH - MARGIN, content_bottom - text_h - gap)
+        txt_box = (MARGIN, img_box[3] + gap, PAGE_WIDTH - MARGIN, content_bottom)
     else:
-        txt_box = (MARGIN, top, MARGIN + txt_w, bottom)
-        img_box = (PAGE_WIDTH - MARGIN - img_w, top, PAGE_WIDTH - MARGIN, bottom)
+        img_w = int((PAGE_WIDTH - 2 * MARGIN) * 0.58)
+        if layout == 1:  # image right, text left
+            img_box = (PAGE_WIDTH - MARGIN - img_w, content_top, PAGE_WIDTH - MARGIN, content_bottom)
+            txt_box = (MARGIN, content_top, img_box[0] - gap, content_bottom)
+        else:  # image left, text right
+            img_box = (MARGIN, content_top, MARGIN + img_w, content_bottom)
+            txt_box = (img_box[2] + gap, content_top, PAGE_WIDTH - MARGIN, content_bottom)
 
-    # Image card (rounded, white border) with one or more photos
-    draw.rounded_rectangle(img_box, radius=18, fill=WHITE, outline=LIGHT_LINE, width=2)
-    if images:
-        available = [p for p in images if p and Path(p).exists()]
-        if available:
-            _paint_images(page, available, img_box)
+    _paint_images_cover(page, images, img_box)
 
-    # Text card
     draw.rounded_rectangle(txt_box, radius=18, fill=WHITE, outline=LIGHT_LINE, width=2)
     _paint_itinerary_text(draw, day, txt_box)
-
-    # Day subtotal
-    subtotal = sum(e.cost_per_person for e in day.events)
-    small = _load_font(16)
-    note = f"当日人均估算费用 ¥{subtotal:,}" if subtotal else "当日无额外费用"
-    w = draw.textlength(note, font=small)
-    draw.text((PAGE_WIDTH - MARGIN - w, bottom + 14), note, font=small, fill=GRAY)
     return page
 
 
-def _paint_images(page: Image.Image, images: list[str], box: tuple[int, int, int, int]) -> None:
-    inner_x, inner_y, inner_x2, inner_y2 = box
-    pad = 20
-    area_w = inner_x2 - inner_x - pad * 2
-    area_h = inner_y2 - inner_y - pad * 2
+def _measure_text_height(draw: ImageDraw.ImageDraw, day: ItineraryDay, max_width: int) -> int:
+    desc_font = _load_font(16)
+    height = 36
+    for event in day.events:
+        height += 30
+        if event.description and event.category not in ("logistics", "break"):
+            lines = len(_wrap_text(draw, event.description, desc_font, max_width)) or 1
+            height += min(lines, 2) * 22
+        height += 14
+    return height
 
-    if len(images) == 1:
-        fit = _fit_image(images[0], area_w, area_h)
-        page.paste(fit, (inner_x + (area_w - fit.width) // 2 + pad, inner_y + (area_h - fit.height) // 2 + pad))
+
+def _paint_images_cover(page: Image.Image, images: list[str], box: tuple[int, int, int, int]) -> None:
+    """Fill the whole box with photos (cover-cropped); multiple photos become a grid."""
+    x1, y1, x2, y2 = box
+    available = [p for p in images if p and Path(p).exists()]
+    draw = ImageDraw.Draw(page)
+
+    if not available:
+        draw.rounded_rectangle(box, radius=14, fill=NAVY_LIGHT)
+        draw.text((x1 + 20, y1 + 20), "暂无图片", font=_load_font(20), fill=WHITE)
         return
 
-    cols = 2 if len(images) >= 2 else 1
-    rows = (len(images) + cols - 1) // cols
-    cell_w = (area_w - (cols - 1) * 12) // cols
-    cell_h = (area_h - (rows - 1) * 12) // rows
-    for index, path in enumerate(images[: cols * rows]):
-        fit = _fit_image(path, cell_w, cell_h)
-        col = index % cols
-        row = index // cols
-        cx = inner_x + pad + col * (cell_w + 12) + (cell_w - fit.width) // 2
-        cy = inner_y + pad + row * (cell_h + 12) + (cell_h - fit.height) // 2
-        page.paste(fit, (cx, cy))
+    if len(available) == 1:
+        page.paste(_cover_image(available[0], x2 - x1, y2 - y1), (x1, y1))
+        draw.rectangle([x1, y1, x2 - 1, y2 - 1], outline=WHITE, width=3)
+        return
+
+    cols = 2
+    rows = (len(available) + cols - 1) // cols
+    cell_w = (x2 - x1) // cols
+    cell_h = (y2 - y1) // rows
+    for index, path in enumerate(available[: cols * rows]):
+        cx = x1 + (index % cols) * cell_w
+        cy = y1 + (index // cols) * cell_h
+        page.paste(_cover_image(path, cell_w, cell_h), (cx, cy))
+        draw.rectangle([cx, cy, cx + cell_w - 1, cy + cell_h - 1], outline=WHITE, width=3)
 
 
 def _paint_itinerary_text(draw: ImageDraw.ImageDraw, day: ItineraryDay, box: tuple[int, int, int, int]) -> None:
@@ -282,8 +295,14 @@ def _paint_itinerary_text(draw: ImageDraw.ImageDraw, day: ItineraryDay, box: tup
                 cursor_y += 22
         cursor_y += 14
 
-        if cursor_y > box[3] - 60:
+        if cursor_y > box[3] - 70:
             break
+
+    # day subtotal pinned to the bottom of the text card
+    subtotal = sum(e.cost_per_person for e in day.events)
+    note = f"当日人均估算费用 ¥{subtotal:,}" if subtotal else "当日无额外费用"
+    note_font = _load_font(16)
+    draw.text((box[0] + 26, box[3] - 44), note, font=note_font, fill=GRAY)
 
 
 # ------------------------------------------------------------------
