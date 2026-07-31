@@ -33,7 +33,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 | 天气 | 和风天气（逐日预报，行程编排参考） |
 | 路线优化 | Google OR-Tools |
 | 文生图 | ComfyUI（`MOCK_IMAGEGEN=true` 时使用预处理素材） |
-| 交付物 | Markdown 报告 + Pillow 合成 PDF（封面 + 分日插图页，含估算数据标注） |
+| 交付物 | 小册子风格 PDF（图文分区、交替排版、总结页）+ Markdown 报告（含估算标注） |
 | API | FastAPI（可选，含 SSE 流式进度） |
 | 持久化 | JSON 文件（方案版本 + 审批记录 + 报告/PDF/海报） |
 | 防护与评估 | Prompt Injection Guard、资源评分排序、确定性校验、质量评估框架 |

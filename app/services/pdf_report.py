@@ -1,11 +1,14 @@
-"""PDF report generator: cover poster + per-day illustrated itinerary pages.
+"""PDF report generator: travel-brochure style.
 
-Uses Pillow for image compositing and PDF assembly.
+Layout model (all pages share the same size, text never overlaid on photos):
+- Cover: full-bleed poster with a side info panel.
+- Day pages: alternating image/text panels (odd pages image-left,
+  even pages image-right); each page may contain one or more photos.
+- Summary page: budget table + data-provenance notes.
 """
 from __future__ import annotations
 
 import logging
-import textwrap
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -16,6 +19,18 @@ logger = logging.getLogger(__name__)
 
 PAGE_WIDTH = 896
 PAGE_HEIGHT = 1152
+
+MARGIN = 48
+FOOTER_Y = 1068
+
+NAVY = (24, 58, 92)
+NAVY_LIGHT = (56, 102, 146)
+GOLD = (212, 175, 55)
+PAPER = (245, 246, 248)
+WHITE = (255, 255, 255)
+INK = (45, 52, 62)
+GRAY = (122, 130, 140)
+LIGHT_LINE = (222, 226, 232)
 
 FONT_SEARCH_PATHS = [
     "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -37,6 +52,28 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Wrap text by measured pixel width (handles CJK reliably)."""
+    lines: list[str] = []
+    for raw in text.split("\n"):
+        current = ""
+        for ch in raw:
+            if draw.textlength(current + ch, font=font) <= max_width:
+                current += ch
+            else:
+                lines.append(current)
+                current = ch
+        lines.append(current)
+    return lines
+
+
+def _fit_image(path: str, box_w: int, box_h: int) -> Image.Image:
+    img = Image.open(path).convert("RGB")
+    ratio = min(box_w / img.width, box_h / img.height)
+    new_size = (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+    return img.resize(new_size, Image.Resampling.LANCZOS)
+
+
 def build_pdf_report(
     request: PlanRequest,
     itinerary: list[ItineraryDay],
@@ -45,16 +82,19 @@ def build_pdf_report(
     output_path: str,
     quote: Quote | None = None,
 ) -> str:
-    """Assemble the final PDF: cover + per-day illustrated pages."""
-    pages: list[Image.Image] = []
+    """Assemble the final brochure PDF: cover + per-day pages + summary."""
+    pages: list[Image.Image] = [build_cover(request, poster_path)]
 
-    cover = _build_cover(request, poster_path)
-    pages.append(cover)
+    for index, day in enumerate(itinerary):
+        raw = day_image_paths[index] if index < len(day_image_paths) else None
+        images = raw if isinstance(raw, list) else ([raw] if raw else [])
+        pages.append(build_day_page(day, images, day.day % 2 == 1))
 
-    for i, day in enumerate(itinerary):
-        image_path = day_image_paths[i] if i < len(day_image_paths) else None
-        page = _build_day_page(request, day, image_path, quote)
-        pages.append(page)
+    pages.append(build_summary_page(request, quote))
+
+    total = len(pages)
+    for index, page in enumerate(pages, start=1):
+        draw_footer(page, index, total)
 
     pages[0].save(
         output_path,
@@ -63,96 +103,259 @@ def build_pdf_report(
         append_images=pages[1:],
         resolution=150,
     )
-    logger.info("PDF report → %s (%d pages)", output_path, len(pages))
+    logger.info("PDF report → %s (%d pages)", output_path, total)
     return output_path
 
 
-def _build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
+# ------------------------------------------------------------------
+# Footer
+# ------------------------------------------------------------------
+
+def draw_footer(page: Image.Image, page_number: int, total_pages: int) -> None:
+    draw = ImageDraw.Draw(page)
+    small = _load_font(15)
+    note = "* 部分数据为 AI 估算，实际以官方/供应商渠道为准 *"
+    draw.text((MARGIN, FOOTER_Y + 2), note, font=small, fill=GRAY)
+    pager = f"{page_number} / {total_pages}"
+    w = draw.textlength(pager, font=small)
+    draw.text((PAGE_WIDTH - MARGIN - w, FOOTER_Y + 2), pager, font=small, fill=GRAY)
+
+
+def _draw_top_bar(draw: ImageDraw.ImageDraw, title: str, subtitle: str = "") -> None:
+    draw.rectangle([0, 0, PAGE_WIDTH, 8], fill=GOLD)
+    draw.rectangle([0, 8, PAGE_WIDTH, 96], fill=NAVY)
+    title_font = _load_font(38)
+    sub_font = _load_font(18)
+    draw.text((MARGIN, 26), title, font=title_font, fill=WHITE)
+    if subtitle:
+        draw.text((MARGIN, 66), subtitle, font=sub_font, fill=(205, 216, 228))
+
+
+# ------------------------------------------------------------------
+# Cover page
+# ------------------------------------------------------------------
+
+def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
+    page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), NAVY)
     if poster_path and Path(poster_path).exists():
-        img = Image.open(poster_path).convert("RGB")
-        img = img.resize((PAGE_WIDTH, PAGE_HEIGHT), Image.Resampling.LANCZOS)
-    else:
-        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), (41, 128, 185))
+        bg = _fit_image(poster_path, PAGE_WIDTH, PAGE_HEIGHT)
+        page.paste(bg, ((PAGE_WIDTH - bg.width) // 2, (PAGE_HEIGHT - bg.height) // 2))
 
-    draw = ImageDraw.Draw(img)
-    overlay = Image.new("RGBA", (PAGE_WIDTH, 200), (0, 0, 0, 140))
-    img.paste(Image.alpha_composite(
-        img.crop((0, PAGE_HEIGHT - 200, PAGE_WIDTH, PAGE_HEIGHT)).convert("RGBA"),
-        overlay,
-    ).convert("RGB"), (0, PAGE_HEIGHT - 200))
+    # Right side info panel (translucent white)
+    panel = Image.new("RGBA", (PAGE_WIDTH, PAGE_HEIGHT), (0, 0, 0, 0))
+    pd = ImageDraw.Draw(panel)
+    pd.rectangle([540, 0, PAGE_WIDTH, PAGE_HEIGHT], fill=(255, 255, 255, 235))
+    page = Image.alpha_composite(page.convert("RGBA"), panel).convert("RGB")
 
+    draw = ImageDraw.Draw(page)
     title_font = _load_font(42)
-    sub_font = _load_font(22)
+    head_font = _load_font(20)
+    body_font = _load_font(22)
+    small_font = _load_font(16)
 
-    draw = ImageDraw.Draw(img)
-    draw.text((40, PAGE_HEIGHT - 180), request.title, font=title_font, fill="white")
-    subtitle = (
-        f"{request.destination} · {request.days}天{request.nights}晚 · "
-        f"{request.group_size}人 · {request.target_audience}"
-    )
-    draw.text((40, PAGE_HEIGHT - 120), subtitle, font=sub_font, fill=(220, 220, 220))
-    draw.text((40, PAGE_HEIGHT - 85), "TripOps AI · 智能旅行策划", font=sub_font, fill=(180, 180, 180))
-    draw.text((40, PAGE_HEIGHT - 50), "* 部分数据为 AI 估算，实际以官方/供应商渠道为准 *", font=sub_font, fill=(150, 150, 150))
+    x = 572
+    y = 120
+    draw.text((x, y), "TRIP PLANNER", font=head_font, fill=GOLD)
+    y += 46
 
-    return img
+    for line in _wrap_text(draw, request.title, title_font, 300)[:4]:
+        draw.text((x, y), line, font=title_font, fill=INK)
+        y += 56
+    y += 12
+
+    for label, value in (
+        ("目的地", request.destination),
+        ("周期", f"{request.days} 天 {request.nights} 晚"),
+        ("人数", f"{request.group_size} 人"),
+        ("客群", request.target_audience),
+        ("主题", " / ".join(request.themes) or "综合"),
+    ):
+        draw.text((x, y), f"{label}", font=head_font, fill=GOLD)
+        y += 28
+        draw.text((x, y), value, font=body_font, fill=INK)
+        y += 44
+
+    draw.line([(x, y), (x + 300, y)], fill=LIGHT_LINE, width=1)
+    y += 22
+    draw.text((x, y), "TripOps AI · 智能旅行策划", font=small_font, fill=GRAY)
+    return page
 
 
-def _build_day_page(
-    request: PlanRequest,
+# ------------------------------------------------------------------
+# Day pages (alternating layout, multi-image support)
+# ------------------------------------------------------------------
+
+def build_day_page(
     day: ItineraryDay,
-    image_path: str | None,
-    quote: Quote | None,
+    images: list[str],
+    image_left: bool,
 ) -> Image.Image:
-    if image_path and Path(image_path).exists():
-        img = Image.open(image_path).convert("RGB")
-        img = img.resize((PAGE_WIDTH, PAGE_HEIGHT), Image.Resampling.LANCZOS)
+    page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), PAPER)
+    draw = ImageDraw.Draw(page)
+    _draw_top_bar(draw, f"DAY {day.day}", day.theme)
+
+    # Content area: 96..1068
+    gap = 24
+    img_w = 372
+    txt_w = PAGE_WIDTH - 2 * MARGIN - img_w - gap
+    top = 132
+    bottom = 1030
+
+    if image_left:
+        img_box = (MARGIN, top, MARGIN + img_w, bottom)
+        txt_box = (PAGE_WIDTH - MARGIN - txt_w, top, PAGE_WIDTH - MARGIN, bottom)
     else:
-        colors = [(41, 128, 185), (39, 174, 96), (142, 68, 173), (211, 84, 0)]
-        color = colors[(day.day - 1) % len(colors)]
-        img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), color)
+        txt_box = (MARGIN, top, MARGIN + txt_w, bottom)
+        img_box = (PAGE_WIDTH - MARGIN - img_w, top, PAGE_WIDTH - MARGIN, bottom)
 
-    overlay = Image.new("RGBA", (PAGE_WIDTH, PAGE_HEIGHT), (0, 0, 0, 120))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    # Image card (rounded, white border) with one or more photos
+    draw.rounded_rectangle(img_box, radius=18, fill=WHITE, outline=LIGHT_LINE, width=2)
+    if images:
+        available = [p for p in images if p and Path(p).exists()]
+        if available:
+            _paint_images(page, available, img_box)
 
-    draw = ImageDraw.Draw(img)
-    title_font = _load_font(36)
-    event_font = _load_font(22)
-    small_font = _load_font(18)
+    # Text card
+    draw.rounded_rectangle(txt_box, radius=18, fill=WHITE, outline=LIGHT_LINE, width=2)
+    _paint_itinerary_text(draw, day, txt_box)
 
-    y = 40
-    draw.text((40, y), f"Day {day.day}", font=title_font, fill=(255, 215, 0))
-    y += 50
-    draw.text((40, y), day.theme, font=title_font, fill="white")
-    y += 60
+    # Day subtotal
+    subtotal = sum(e.cost_per_person for e in day.events)
+    small = _load_font(16)
+    note = f"当日人均估算费用 ¥{subtotal:,}" if subtotal else "当日无额外费用"
+    w = draw.textlength(note, font=small)
+    draw.text((PAGE_WIDTH - MARGIN - w, bottom + 14), note, font=small, fill=GRAY)
+    return page
 
-    draw.line([(40, y), (PAGE_WIDTH - 40, y)], fill=(255, 255, 255, 128), width=1)
-    y += 20
 
+def _paint_images(page: Image.Image, images: list[str], box: tuple[int, int, int, int]) -> None:
+    inner_x, inner_y, inner_x2, inner_y2 = box
+    pad = 20
+    area_w = inner_x2 - inner_x - pad * 2
+    area_h = inner_y2 - inner_y - pad * 2
+
+    if len(images) == 1:
+        fit = _fit_image(images[0], area_w, area_h)
+        page.paste(fit, (inner_x + (area_w - fit.width) // 2 + pad, inner_y + (area_h - fit.height) // 2 + pad))
+        return
+
+    cols = 2 if len(images) >= 2 else 1
+    rows = (len(images) + cols - 1) // cols
+    cell_w = (area_w - (cols - 1) * 12) // cols
+    cell_h = (area_h - (rows - 1) * 12) // rows
+    for index, path in enumerate(images[: cols * rows]):
+        fit = _fit_image(path, cell_w, cell_h)
+        col = index % cols
+        row = index // cols
+        cx = inner_x + pad + col * (cell_w + 12) + (cell_w - fit.width) // 2
+        cy = inner_y + pad + row * (cell_h + 12) + (cell_h - fit.height) // 2
+        page.paste(fit, (cx, cy))
+
+
+def _paint_itinerary_text(draw: ImageDraw.ImageDraw, day: ItineraryDay, box: tuple[int, int, int, int]) -> None:
+    x, y, x2, _ = box
+    pad = 26
+    event_font = _load_font(20)
+    desc_font = _load_font(16)
+    small_font = _load_font(16)
+
+    cursor_y = y + pad
+    right = x2 - pad
     for event in day.events:
         time_str = f"{event.start_time} - {event.end_time}"
-        cost_str = f"  ¥{event.cost_per_person}" if event.cost_per_person else ""
 
-        draw.text((40, y), time_str, font=event_font, fill=(255, 215, 0))
-        draw.text((220, y), event.title[:28], font=event_font, fill="white")
-        if cost_str:
-            draw.text((PAGE_WIDTH - 120, y), cost_str, font=event_font, fill=(144, 238, 144))
-        y += 32
+        # timeline dot + line
+        dot_x = x + pad + 4
+        draw.ellipse([dot_x - 5, cursor_y + 8, dot_x + 5, cursor_y + 18], fill=GOLD)
+        draw.line([(dot_x, cursor_y + 18), (dot_x, cursor_y + 40)], fill=LIGHT_LINE, width=2)
 
+        # time
+        draw.text((x + pad + 22, cursor_y), time_str, font=small_font, fill=GOLD)
+        # title
+        draw.text((x + pad + 110, cursor_y), event.title[:24], font=event_font, fill=INK)
+        cursor_y += 30
+
+        # description (up to 2 lines)
         if event.description and event.category not in ("logistics", "break"):
-            wrapped = textwrap.wrap(event.description[:80], width=38)
-            for line in wrapped[:2]:
-                draw.text((60, y), line, font=small_font, fill=(200, 200, 200))
-                y += 24
-        y += 12
+            for line in _wrap_text(draw, event.description, desc_font, right - (x + pad + 22))[:2]:
+                draw.text((x + pad + 22, cursor_y), line, font=desc_font, fill=GRAY)
+                cursor_y += 22
+        cursor_y += 14
 
-    if quote and day.day == 1:
-        y = max(y + 20, PAGE_HEIGHT - 160)
-        draw.line([(40, y), (PAGE_WIDTH - 40, y)], fill=(255, 255, 255, 128), width=1)
-        y += 15
-        draw.text((40, y), f"总成本: ¥{quote.total_cost:,}  |  人均售价: ¥{quote.sale_price_per_person:,}  |  毛利率: {quote.margin_rate:.1%}",
-                  font=small_font, fill=(200, 200, 200))
+        if cursor_y > box[3] - 60:
+            break
 
-    draw.text((40, PAGE_HEIGHT - 62), "* 部分数据为 AI 估算，实际以官方/供应商渠道为准 *", font=small_font, fill=(150, 150, 150))
-    draw.text((40, PAGE_HEIGHT - 40), "TripOps AI", font=small_font, fill=(150, 150, 150))
 
-    return img
+# ------------------------------------------------------------------
+# Summary page
+# ------------------------------------------------------------------
+
+def build_summary_page(request: PlanRequest, quote: Quote | None) -> Image.Image:
+    page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), PAPER)
+    draw = ImageDraw.Draw(page)
+    _draw_top_bar(draw, "方案总结")
+
+    x = MARGIN + 24
+    y = 140
+    head_font = _load_font(24)
+    body_font = _load_font(20)
+    small_font = _load_font(16)
+
+    if quote and quote.items:
+        draw.text((x, y), "预算明细（估算）", font=head_font, fill=NAVY)
+        y += 44
+
+        col_x = (MARGIN + 24, MARGIN + 300, PAGE_WIDTH - MARGIN - 200)
+        table_y = y
+        header_fill = NAVY
+        # header row
+        draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 44], fill=header_fill)
+        draw.text((col_x[0] + 16, table_y + 10), "类别", font=body_font, fill=WHITE)
+        draw.text((col_x[1] + 16, table_y + 10), "说明", font=body_font, fill=WHITE)
+        draw.text((PAGE_WIDTH - MARGIN - 24 - 130, table_y + 10), "金额", font=body_font, fill=WHITE)
+        table_y += 44
+
+        for index, item in enumerate(quote.items):
+            row_fill = WHITE if index % 2 == 0 else (236, 240, 244)
+            draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 40], fill=row_fill)
+            draw.text((col_x[0] + 16, table_y + 10), item.category, font=body_font, fill=INK)
+            draw.text((col_x[1] + 16, table_y + 10), item.description[:16], font=small_font, fill=INK)
+            amount = f"¥{item.amount:,}"
+            aw = draw.textlength(amount, font=body_font)
+            draw.text((PAGE_WIDTH - MARGIN - 24 - 24 - aw, table_y + 10), amount, font=body_font, fill=INK)
+            table_y += 40
+
+        # total row
+        draw.rectangle([MARGIN + 24, table_y, PAGE_WIDTH - MARGIN - 24, table_y + 46], fill=GOLD)
+        draw.text((col_x[0] + 16, table_y + 10), "合计", font=body_font, fill=INK)
+        total = f"¥{quote.total_cost:,}"
+        tw = draw.textlength(total, font=body_font)
+        draw.text((PAGE_WIDTH - MARGIN - 24 - 24 - tw, table_y + 10), total, font=body_font, fill=INK)
+        table_y += 60
+
+        summary_lines = (
+            f"人均成本: ¥{quote.cost_per_person:,}   ·   人均售价: ¥{quote.sale_price_per_person:,}"
+            f"   ·   毛利率: {quote.margin_rate:.1%}"
+        )
+        draw.text((x, table_y), summary_lines, font=body_font, fill=INK)
+        table_y += 56
+    else:
+        draw.text((x, y), "暂无报价数据", font=body_font, fill=GRAY)
+        table_y = y + 60
+
+    draw.text((x, table_y), "数据来源说明", font=head_font, fill=NAVY)
+    table_y += 44
+    notes = [
+        "✅ 景点/攻略：Tavily 实时网页搜索 + 高德 POI（真实检索）",
+        "✅ 天气：和风天气官方预报",
+        "⚠️ 景点票价 / 建议时长 / 开放时间：LLM 估算，需官方确认",
+        "🟡 景点间交通时间：高德实测 + LLM 估算兜底",
+        "⚠️ 成本明细：LLM 市场估价，以供应商报价为准",
+        "🟡 行程编排与活动描述：AI 生成，仅供参考",
+        "✅ 路线优化 / 约束校验 / 计价：确定性计算",
+    ]
+    for note in notes:
+        draw.text((x, table_y), note, font=small_font, fill=GRAY)
+        table_y += 34
+
+    return page
