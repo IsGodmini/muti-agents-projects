@@ -29,12 +29,12 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 | Agent 编排 | LangGraph（14 节点、3 个条件路由、interrupt 审批） |
 | LLM | 火山引擎 Ark（多模型分层：复杂推理 / 简单推理 / 多模态） |
 | 搜索 | Tavily Remote MCP + 高德 POI（双路实时检索） |
-| 地图与交通 | 高德开放平台（POI、真实交通时间、周边餐饮/酒店） |
+| 地图与交通 | 高德开放平台（POI、真实交通时间、周边餐饮） |
 | 路线优化 | Google OR-Tools |
 | 文生图 | ComfyUI（`MOCK_IMAGEGEN=true` 时使用预处理素材） |
 | 交付物 | Markdown 报告 + Pillow 合成 PDF（封面 + 分日插图页） |
 | API | FastAPI（可选，含 SSE 流式进度） |
-| 持久化 | JSON 文件（默认）/ PostgreSQL（asyncpg，可选，含 pgvector 检索） |
+| 持久化 | JSON 文件（方案版本 + 审批记录 + 报告/PDF/海报） |
 | 防护与评估 | Prompt Injection Guard、资源评分排序、确定性校验、质量评估框架 |
 
 ## 项目结构
@@ -50,12 +50,11 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 │   ├── api/routes.py       # FastAPI 路由（health/tools/chat/plans/approval/SSE）
 │   ├── models/schemas.py   # Pydantic Schema
 │   ├── services/           # guard / ranking / verifier / evaluation /
-│   │                       # renderer / pdf_report / db / weather / amap /
-│   │                       # tavily_mcp / model_gateway / plan_store / poster / profile
-│   └── tools/              # Tool Registry（11 个工具）
+│   │                       # renderer / pdf_report / amap / tavily_mcp /
+│   │                       # model_gateway / plan_store / poster
+│   └── tools/              # Tool Registry（8 个工具）
 ├── scripts/                # e2e 全流程、ComfyUI 连通性脚本
 ├── tests/                  # 17 个单元测试 + 3 个可选集成测试（ComfyUI）
-├── infra/postgres/         # PostgreSQL/PostGIS/pgvector 初始化（可选）
 └── docs/                   # 设计文档
 ```
 

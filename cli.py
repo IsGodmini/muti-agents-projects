@@ -244,7 +244,6 @@ async def run_workflow(request: PlanRequest) -> None:
 
     data = {k: v for k, v in result.items() if not k.startswith("__")}
 
-    success(f"Skill: {data.get('selected_skill', 'unknown')}")
     success(f"检索到 {len(data.get('resources', []))} 个资源")
 
     print_itinerary(data)

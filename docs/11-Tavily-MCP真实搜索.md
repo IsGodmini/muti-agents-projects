@@ -109,7 +109,7 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 - `invoke`：同步计算工具。
 - `ainvoke`：异步 MCP 或其他 I/O 工具。
 
-若错误地使用 `invoke` 调用异步 Tool，Registry 会立即报错，避免未等待的协程继续进入工作流。`ainvoke` 还会记录调用耗时与状态（PostgreSQL 可用时写入 `tool_invocations`）。
+若错误地使用 `invoke` 调用异步 Tool，Registry 会立即报错，避免未等待的协程继续进入工作流。`ainvoke` 用于所有异步 I/O 工具（如 MCP 网络调用）。
 
 ## 8. 测试
 
@@ -126,6 +126,6 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 1. 使用域名白名单优先召回政府、文旅局和景区官网。
 2. 增加 `tavily_extract` 二次提取开放时间与票价。
 3. 对 URL 去重并缓存短时间内的相同查询。
-4. 把来源存入 PostgreSQL，记录方案版本与证据关系。
+4. 把来源纳入版本快照持久化，记录方案与证据的关系。
 5. ~~对外部文本做 Prompt Injection 检测~~ ✅ 已实现（`app/services/guard.py`）。
-6. ~~接入地图 API 验证真实坐标和交通时间~~ ✅ 已实现（高德 POI / `get_travel_time`）。
+6. ~~接入地图 API 验证真实坐标和交通时间~~ ✅ 已实现（高德 POI / 真实路径时长）。

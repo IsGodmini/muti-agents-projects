@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "TripOps AI multi-agent travel product planning backend"
 requires-python = ">=3.12"
 dependencies = [
-  "asyncpg>=0.31.0",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "langgraph>=0.2,<2",

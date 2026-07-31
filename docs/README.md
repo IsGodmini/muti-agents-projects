@@ -33,5 +33,5 @@
 | Markdown 报告 + PDF 交付物（Pillow） | ✅ |
 | FastAPI REST API（含 /chat 与 SSE 流式） | ✅ |
 | ComfyUI 文生图（Mock/真实端点切换） | ✅ |
-| PostgreSQL（asyncpg 适配器 + pgvector 检索） | 🟡 可选接入，默认文件存储 |
-| 混合检索 / 持久化 checkpoint / 可观测性平台 | ⬜ 规划 |
+| PostgreSQL 持久化 | ⬜ 已移除（个人工具使用 JSON 文件即可） |
+| 向量混合检索 / 持久化 checkpoint / 可观测性平台 | ⬜ 规划 |

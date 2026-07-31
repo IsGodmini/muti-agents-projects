@@ -94,7 +94,7 @@ async def parse_requirements(state: PlanningState) -> dict:
                 ),
                 schema=RequirementAnalysis,
             )
-            logger.info("LLM requirement analysis: skill=%s", analysis.selected_skill)
+            logger.info("LLM requirement analysis complete=%s", analysis.requirements_complete)
             return {
                 "requirements_complete": analysis.requirements_complete,
                 "missing_fields": analysis.missing_fields,

@@ -15,26 +15,3 @@ services:
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       TAVILY_SEARCH_DEPTH: ${TAVILY_SEARCH_DEPTH:-advanced}
       TAVILY_SEARCH_TIMEOUT_SECONDS: ${TAVILY_SEARCH_TIMEOUT_SECONDS:-30}
-
-  # 规划中的持久化层：当前应用使用 JSON 文件存储，尚未连接数据库。
-  # 需要 PostGIS/pgvector 时取消注释，并参见 infra/postgres/init.sql。
-  # postgres:
-  #   build:
-  #     context: ./infra/postgres
-  #   environment:
-  #     POSTGRES_DB: tripops
-  #     POSTGRES_USER: tripops
-  #     POSTGRES_PASSWORD: tripops
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #     - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U tripops -d tripops"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 10
-
-# volumes:
-#   postgres_data:

@@ -43,10 +43,7 @@ TEST_RESOURCES = [
 async def _mock_structured_completion(self, *, schema, **kwargs):
     """Return appropriate test data based on the requested schema."""
     if schema is RequirementAnalysis:
-        return RequirementAnalysis(
-            selected_skill="family_trip_planning",
-            requirements_complete=True,
-        )
+        return RequirementAnalysis(requirements_complete=True)
     if schema is ResourceEnrichmentBatch:
         return ResourceEnrichmentBatch(resources=[])
     if schema is TravelTimeMatrix:

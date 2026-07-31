@@ -208,11 +208,8 @@ class ToolSummary(BaseModel):
 
 
 class RequirementAnalysis(BaseModel):
-    selected_skill: str
     requirements_complete: bool
     missing_fields: list[str] = Field(default_factory=list)
-    extracted_constraints: list[str] = Field(default_factory=list)
-    audience_notes: str = ""
 
 
 class EnrichedResourceInfo(BaseModel):
@@ -226,22 +223,6 @@ class EnrichedResourceInfo(BaseModel):
 
 class ResourceEnrichmentBatch(BaseModel):
     resources: list[EnrichedResourceInfo]
-
-
-class EventEnrichment(BaseModel):
-    resource_id: str
-    description: str
-    practical_tips: str = ""
-
-
-class DayEnrichment(BaseModel):
-    day: int
-    theme: str
-    events: list[EventEnrichment]
-
-
-class ItineraryEnrichmentBatch(BaseModel):
-    days: list[DayEnrichment]
 
 
 class QualityAssessment(BaseModel):

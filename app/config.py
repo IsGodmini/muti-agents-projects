@@ -25,9 +25,6 @@ class Settings(BaseSettings):
     llm_model_simple: str = "Doubao-Seed-2.0-lite"
     llm_model_multimodal: str = "Doubao-Seed-2.1-turbo"
 
-    embedding_base_url: str = "http://10.29.248.167:11434/v1"
-    embedding_model: str = "qwen3-embedding:0.6b"
-
     imagegen_api_url: str = "http://10.29.248.167:8188"
     mock_imagegen: bool = False
 
@@ -41,11 +38,6 @@ class Settings(BaseSettings):
 
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com/v3"
-
-    weather_api_key: str = ""
-    weather_base_url: str = "https://devapi.qweather.com/v7"
-
-    database_url: str = ""
 
 
 @lru_cache

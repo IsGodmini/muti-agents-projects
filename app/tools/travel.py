@@ -40,28 +40,6 @@ async def search_poi_amap(payload: AmapPOISearchInput) -> list[ResourceCandidate
     return [_place_to_resource(p) for p in places]
 
 
-class TravelTimeInput(BaseModel):
-    origin: str = Field(description="lng,lat")
-    destination: str = Field(description="lng,lat")
-    mode: str = Field(default="transit", description="transit/driving/walking")
-    city: str = ""
-
-
-@tool_registry.register(
-    name="get_travel_time",
-    description="Get real travel time (minutes) between two coordinates via Gaode Maps.",
-    category="geo_compute",
-    risk_level=ToolRisk.READ_ONLY,
-    input_model=TravelTimeInput,
-)
-async def get_travel_time(payload: TravelTimeInput) -> int:
-    settings = get_settings()
-    if not settings.amap_api_key:
-        return 30
-    client = AmapClient(settings.amap_api_key, settings.amap_base_url)
-    return await client.travel_time(payload.origin, payload.destination, mode=payload.mode, city=payload.city)
-
-
 class NearbySearchInput(BaseModel):
     location: str = Field(description="lng,lat")
     keywords: str = ""
@@ -87,75 +65,6 @@ async def search_nearby_restaurants(payload: NearbySearchInput) -> list[Resource
         radius=payload.radius, limit=payload.limit,
     )
     return [_place_to_resource(p) for p in places]
-
-
-# ------------------------------------------------------------------
-# Hotel search tool
-# ------------------------------------------------------------------
-
-class HotelSearchInput(BaseModel):
-    city: str = Field(description="城市名称")
-    keywords: str = Field(default="", description="酒店关键词，如品牌或区域")
-    location: str = Field(default="", description="lng,lat 中心点坐标")
-    radius: int = Field(default=5000, ge=1000, le=50000)
-    limit: int = Field(default=5, ge=1, le=20)
-
-
-@tool_registry.register(
-    name="search_hotels",
-    description="Search hotels/accommodation via Gaode Maps POI (type 100000).",
-    category="geo_search",
-    risk_level=ToolRisk.READ_ONLY,
-    input_model=HotelSearchInput,
-)
-async def search_hotels(payload: HotelSearchInput) -> list[ResourceCandidate]:
-    settings = get_settings()
-    if not settings.amap_api_key:
-        return []
-    client = AmapClient(settings.amap_api_key, settings.amap_base_url)
-
-    if payload.location:
-        places = await client.search_nearby(
-            payload.location,
-            keywords=payload.keywords or "酒店",
-            types="100000",
-            radius=payload.radius,
-            limit=payload.limit,
-        )
-    else:
-        places = await client.search_poi(
-            keywords=f"{payload.keywords or '酒店'}",
-            city=payload.city,
-            types="100000",
-            limit=payload.limit,
-        )
-    return [_place_to_resource(p) for p in places]
-
-
-# ------------------------------------------------------------------
-# Weather forecast tool
-# ------------------------------------------------------------------
-
-class WeatherForecastInput(BaseModel):
-    city: str = Field(description="城市名称或 lng,lat 坐标")
-    days: int = Field(default=3, ge=1, le=7)
-
-
-@tool_registry.register(
-    name="get_weather_forecast",
-    description="Get multi-day weather forecast for travel planning via QWeather.",
-    category="geo_search",
-    risk_level=ToolRisk.READ_ONLY,
-    input_model=WeatherForecastInput,
-)
-async def get_weather_forecast(payload: WeatherForecastInput) -> list[dict]:
-    settings = get_settings()
-    if not settings.weather_api_key:
-        return []
-    from app.services.weather import WeatherClient
-
-    client = WeatherClient(settings.weather_api_key, settings.weather_base_url)
-    return await client.get_forecast(payload.city, days=payload.days)
 
 
 def _place_to_resource(place) -> ResourceCandidate:
