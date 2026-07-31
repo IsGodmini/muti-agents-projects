@@ -8,13 +8,17 @@
   repair_plan          → search_attractions (emergency alternatives)
   calculate_quote      → calculate_product_cost, (LLM estimation)
   quality_review       → (LLM only)
-  approval_gate        → (human interrupt)
+  run_verification     → (deterministic checks)
+  review_decision      → (auto approve / repair loop)
   prepare_poster       → PosterService
+  approval_gate        → interrupt（人工审批，批准/驳回）
   finalize_delivery    → save_plan_version, submit_for_approval
+  mark_rejected        → submit_for_approval（记录驳回决定）
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Literal
@@ -48,9 +52,15 @@ from app.models.schemas import (
     ScheduleBatch,
     TravelTimeMatrix,
 )
+from app.services.guard import filter_resources as guard_filter_resources
 from app.services.model_gateway import ModelGateway
+from app.services.pdf_report import build_pdf_report
 from app.services.plan_store import plan_store
 from app.services.poster import PosterService
+from app.services.ranking import score_resources
+from app.services.renderer import render_markdown_report
+from app.services.tools.amap import AmapClient
+from app.services.verifier import verify_plan
 from app.tools import travel as _travel_tools  # noqa: F401
 from app.tools.registry import tool_registry
 
@@ -69,6 +79,7 @@ async def parse_requirements(state: PlanningState) -> dict:
         try:
             gateway = ModelGateway(settings)
             analysis = await gateway.structured_completion(
+                model=settings.llm_model_complex,
                 system_prompt=REQUIREMENT_ANALYSIS_SYSTEM,
                 user_prompt=(
                     f"产品类型：{request.product_type.value}\n"
@@ -111,15 +122,39 @@ async def retrieve_resources(state: PlanningState) -> dict:
     request = state["request"]
     settings = get_settings()
 
-    resources = await tool_registry.ainvoke(
+    search_themes = list(dict.fromkeys([*request.themes, *request.interests]))
+
+    tavily_task = tool_registry.ainvoke(
         "search_attractions",
-        {
-            "destination": request.destination,
-            "themes": request.themes,
-            "audience": request.target_audience,
-            "limit": 8,
-        },
+        {"destination": request.destination, "themes": search_themes or request.themes,
+         "audience": request.target_audience, "limit": 8},
     )
+    amap_keywords = f"{request.destination} {' '.join(search_themes[:2])} 景点"
+    amap_task = tool_registry.ainvoke(
+        "search_poi_amap",
+        {"keywords": amap_keywords, "city": request.destination, "limit": 10},
+    )
+
+    results = await asyncio.gather(tavily_task, amap_task, return_exceptions=True)
+    resources = []
+    for res in results:
+        if isinstance(res, Exception):
+            logger.warning("Search source failed: %s", res)
+        elif isinstance(res, list):
+            resources.extend(res)
+
+    seen_names: set[str] = set()
+    deduped = []
+    for r in resources:
+        if r.name not in seen_names:
+            seen_names.add(r.name)
+            deduped.append(r)
+    resources = deduped
+
+    # Guard: filter out resources with injection patterns
+    resources, guard_warnings = guard_filter_resources(resources, scan_source="retrieve_resources")
+    for w in guard_warnings:
+        logger.warning("Guard: %s", w)
 
     if not settings.mock_model_mode and resources:
         try:
@@ -127,9 +162,11 @@ async def retrieve_resources(state: PlanningState) -> dict:
         except Exception:
             logger.warning("LLM resource enrichment failed", exc_info=True)
 
+    resources = score_resources(resources, request)
+
     return {
         "resources": resources,
-        "resource_search_provider": resources[0].provider if resources else "none",
+        "resource_search_provider": "+".join({r.provider for r in resources[:5]}) if resources else "none",
         "route_matrix": {},
         "current_stage": "resources_retrieved",
     }
@@ -141,13 +178,26 @@ async def _enrich_resources(settings, resources):
         f"[{i}] 标题：{r.name}\n    摘要：{(r.summary or r.evidence or '')[:300]}\n    来源：{r.source_url or ''}"
         for i, r in enumerate(resources)
     )
+    all_images = []
+    for r in resources:
+        all_images.extend(r.images[:3])
+
     batch = await gateway.structured_completion(
+        model=settings.llm_model_multimodal,
         system_prompt=RESOURCE_ENRICHMENT_SYSTEM,
-        user_prompt=f"目的地资源列表：\n{descriptions}",
+        user_prompt=(
+            f"目的地资源列表：\n{descriptions}\n\n"
+            + ("以下是搜索结果附带的现场图片，请结合图片内容判断景点实况、环境质量和适合人群。"
+               if all_images else "")
+        ),
         schema=ResourceEnrichmentBatch,
         timeout_seconds=45,
+        image_urls=all_images or None,
     )
-    enrichment_map = {item.index: item for item in batch.resources}
+    enrichment_map = {
+        (item.index if item.index >= 0 else pos): item
+        for pos, item in enumerate(batch.resources)
+    }
     enriched = []
     for i, resource in enumerate(resources):
         info = enrichment_map.get(i)
@@ -178,9 +228,20 @@ async def plan_itinerary(state: PlanningState) -> dict:
 
     travel_times = await _estimate_travel_times(settings, resources)
 
-    route_matrix = tool_registry.invoke(
+    coordinates = {}
+    for r in resources:
+        if r.lng and r.lat:
+            coordinates[r.id] = f"{r.lng},{r.lat}"
+
+    route_matrix = await tool_registry.ainvoke(
         "calculate_route_matrix",
-        {"resource_ids": resource_ids, "travel_times": travel_times},
+        {
+            "resource_ids": resource_ids,
+            "travel_times": travel_times,
+            "coordinates": coordinates,
+            "city": request.destination,
+            "mode": "transit" if "public_transit" in request.transport_preferences else "driving",
+        },
     )
     optimized = tool_registry.invoke(
         "optimize_itinerary",
@@ -191,6 +252,8 @@ async def plan_itinerary(state: PlanningState) -> dict:
             "max_daily_minutes": 480,
         },
     )
+
+    await _search_dining_options(settings, request, resources)
 
     if not settings.mock_model_mode:
         try:
@@ -203,20 +266,81 @@ async def plan_itinerary(state: PlanningState) -> dict:
     return {"itinerary": days, "route_matrix": route_matrix, "current_stage": "itinerary_planned"}
 
 
+async def _search_dining_options(settings, request, resources) -> list:
+    """Search nearby restaurants around the first resource with coordinates."""
+    if not settings.amap_api_key:
+        return []
+    anchor = next((r for r in resources if r.lng and r.lat), None)
+    if not anchor:
+        return []
+    try:
+        restaurants = await tool_registry.ainvoke(
+            "search_nearby_restaurants",
+            {
+                "location": f"{anchor.lng},{anchor.lat}",
+                "keywords": request.destination,
+                "types": "050000",
+                "radius": 5000,
+                "limit": 5,
+            },
+        )
+        if restaurants:
+            logger.info("Found %d dining options near %s", len(restaurants), anchor.name)
+        return restaurants
+    except Exception:
+        logger.warning("Restaurant search failed", exc_info=True)
+        return []
+
+
 async def _estimate_travel_times(settings, resources) -> dict[str, int]:
-    gateway = ModelGateway(settings)
-    resource_list = "\n".join(f"[{i}] {r.name}（{r.location}）" for i, r in enumerate(resources))
-    matrix = await gateway.structured_completion(
-        system_prompt=TRAVEL_TIME_SYSTEM,
-        user_prompt=f"资源列表（共 {len(resources)} 个）：\n{resource_list}",
-        schema=TravelTimeMatrix,
-        timeout_seconds=45,
-    )
+    """Estimate travel times: Amap API for resources with coordinates, LLM fallback."""
     travel_times: dict[str, int] = {}
-    for pair in matrix.pairs:
-        if 0 <= pair.from_index < len(resources) and 0 <= pair.to_index < len(resources):
-            travel_times[f"{resources[pair.from_index].id}->{resources[pair.to_index].id}"] = pair.time
-    logger.info("LLM estimated %d travel-time pairs", len(travel_times))
+
+    coords_available = [r for r in resources if r.lng and r.lat]
+    if settings.amap_api_key and len(coords_available) >= 2:
+        client = AmapClient(settings.amap_api_key, settings.amap_base_url)
+        tasks = []
+        keys = []
+        for source in coords_available:
+            for target in coords_available:
+                if source.id == target.id:
+                    continue
+                keys.append(f"{source.id}->{target.id}")
+                tasks.append(
+                    client.travel_time(
+                        f"{source.lng},{source.lat}",
+                        f"{target.lng},{target.lat}",
+                        mode="transit",
+                    )
+                )
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for key, result in zip(keys, results):
+            travel_times[key] = result if isinstance(result, int) else 30
+        logger.info("Amap real travel times: %d pairs", len(travel_times))
+
+    needs_llm = not settings.mock_model_mode and (
+        len(coords_available) < 2 or len(travel_times) < len(resources) * (len(resources) - 1) // 2
+    )
+    if needs_llm:
+        try:
+            gateway = ModelGateway(settings)
+            resource_list = "\n".join(f"[{i}] {r.name}（{r.location}）" for i, r in enumerate(resources))
+            matrix = await gateway.structured_completion(
+                model=settings.llm_model_complex,
+                system_prompt=TRAVEL_TIME_SYSTEM,
+                user_prompt=f"资源列表（共 {len(resources)} 个）：\n{resource_list}",
+                schema=TravelTimeMatrix,
+                timeout_seconds=45,
+            )
+            for pair in matrix.pairs:
+                if 0 <= pair.from_index < len(resources) and 0 <= pair.to_index < len(resources):
+                    key = f"{resources[pair.from_index].id}->{resources[pair.to_index].id}"
+                    if key not in travel_times:
+                        travel_times[key] = pair.time
+            logger.info("LLM estimated travel times, total pairs: %d", len(travel_times))
+        except Exception:
+            logger.warning("LLM travel time estimation failed", exc_info=True)
+
     return travel_times
 
 
@@ -244,6 +368,7 @@ async def _generate_schedule(settings, request, optimized, resource_map) -> list
         ensure_ascii=False,
     )
     batch = await gateway.structured_completion(
+        model=settings.llm_model_complex,
         system_prompt=SCHEDULE_SYSTEM,
         user_prompt=(
             f"产品：{request.title}\n目的地：{request.destination}\n"
@@ -296,8 +421,16 @@ def _basic_schedule(request, optimized, resource_map) -> list[ItineraryDay]:
 # ------------------------------------------------------------------
 
 def validate_constraints(state: PlanningState) -> dict:
+    """Comprehensive deterministic validation of the itinerary."""
+    request = state["request"]
     issues: list[ConstraintIssue] = []
     actual_max_daily = 0
+    time_conflict_count = 0
+
+    pace_limits = {"intense": 720, "moderate": 600, "relaxed": 480}
+    max_daily = pace_limits.get(request.pace.value if hasattr(request.pace, "value") else "moderate", 600)
+    max_events = {"intense": 6, "moderate": 5, "relaxed": 4}
+    event_limit = max_events.get(request.pace.value if hasattr(request.pace, "value") else "moderate", 5)
 
     for day in state["itinerary"]:
         if not day.events:
@@ -307,27 +440,74 @@ def validate_constraints(state: PlanningState) -> dict:
                 suggested_action="重新分配候选资源。",
             ))
             continue
+
         try:
             start = int(day.events[0].start_time[:2]) * 60 + int(day.events[0].start_time[3:])
             end = int(day.events[-1].end_time[:2]) * 60 + int(day.events[-1].end_time[3:])
         except (ValueError, IndexError):
             continue
+
         day_span = end - start
         actual_max_daily = max(actual_max_daily, day_span)
-        if day_span > 600:
+        if day_span > max_daily:
             issues.append(ConstraintIssue(
                 code="DAILY_DURATION_EXCEEDED", severity="warning",
-                message=f"第 {day.day} 天活动跨度 {day_span} 分钟，超过 10 小时。",
+                message=f"第 {day.day} 天活动跨度 {day_span} 分钟，超过节奏上限 {max_daily} 分钟。",
                 suggested_action="移除低优先级资源或增加休息节点。",
             ))
 
+        if len(day.events) > event_limit:
+            issues.append(ConstraintIssue(
+                code="TOO_MANY_EVENTS", severity="warning",
+                message=f"第 {day.day} 天安排 {len(day.events)} 个活动，超过节奏建议 {event_limit} 个。",
+                suggested_action="减少活动数量，增加休息间隔。",
+            ))
+
+        for i in range(len(day.events) - 1):
+            try:
+                curr_end = int(day.events[i].end_time[:2]) * 60 + int(day.events[i].end_time[3:])
+                next_start = int(day.events[i + 1].start_time[:2]) * 60 + int(day.events[i + 1].start_time[3:])
+                if next_start < curr_end:
+                    time_conflict_count += 1
+                    issues.append(ConstraintIssue(
+                        code="TIME_CONFLICT", severity="blocking",
+                        message=f"第 {day.day} 天「{day.events[i].title}」与「{day.events[i+1].title}」时间重叠。",
+                        event_title=day.events[i].title,
+                        suggested_action="调整开始/结束时间消除重叠。",
+                    ))
+            except (ValueError, IndexError):
+                continue
+
+    must_visit = set(request.must_visit)
+    scheduled_names = {e.title for day in state["itinerary"] for e in day.events}
+    covered = sum(1 for mv in must_visit if any(mv in name for name in scheduled_names))
+    must_visit_coverage = covered / len(must_visit) if must_visit else 1.0
+    if must_visit and must_visit_coverage < 1.0:
+        missing = [mv for mv in must_visit if not any(mv in name for name in scheduled_names)]
+        issues.append(ConstraintIssue(
+            code="MUST_VISIT_MISSING", severity="blocking",
+            message=f"必去地点未覆盖: {', '.join(missing)}",
+            suggested_action="将缺失的必去地点加入行程。",
+        ))
+
+    quote = state.get("quote")
+    budget_accuracy = 0.0
+    if quote:
+        budget_total = request.budget_per_person * request.group_size
+        budget_accuracy = abs(quote.total_cost - budget_total) / max(budget_total, 1)
+
     route_matrix = state.get("route_matrix", {})
+    opening_violations = sum(1 for i in issues if i.code == "OPENING_HOURS")
     report = ConstraintReport(
         valid=not any(i.severity == "blocking" for i in issues),
         score=max(70, 100 - len(issues) * 8),
         issues=issues,
         total_travel_minutes=sum(route_matrix.values()) // max(len(route_matrix), 1),
         max_daily_minutes=actual_max_daily,
+        must_visit_coverage=round(must_visit_coverage, 2),
+        budget_accuracy=round(budget_accuracy, 4),
+        time_conflict_count=time_conflict_count,
+        opening_hours_violations=opening_violations,
     )
     return {"constraint_report": report, "current_stage": "constraints_validated"}
 
@@ -401,6 +581,7 @@ async def _llm_cost_estimation(settings, state):
         for r in resources
     )
     breakdown = await gateway.structured_completion(
+        model=settings.llm_model_complex,
         system_prompt=COST_ESTIMATION_SYSTEM,
         user_prompt=(
             f"目的地：{request.destination}\n天数：{request.days} 天 {request.nights} 晚\n"
@@ -450,6 +631,7 @@ async def _llm_quality_review(settings, state) -> QualityReport:
     constraint = state["constraint_report"]
 
     assessment = await gateway.structured_completion(
+        model=settings.llm_model_complex,
         system_prompt=QUALITY_REVIEW_SYSTEM,
         user_prompt=(
             f"产品：{request.title}\n目的地：{request.destination}\n"
@@ -474,32 +656,85 @@ async def _llm_quality_review(settings, state) -> QualityReport:
 
 
 # ------------------------------------------------------------------
-# approval_gate → human interrupt
+# review_decision → deterministic routing after verification
 # ------------------------------------------------------------------
 
-def approval_gate(state: PlanningState) -> dict:
-    decision = interrupt({
-        "kind": "plan_approval",
-        "plan_id": state["plan_id"],
-        "quality_report": state["quality_report"].model_dump(),
-        "message": "方案已通过自动审核，请确认。",
-    })
-    if not decision.get("approved", False):
-        return {"approval": decision, "current_stage": "approval_rejected", "errors": [decision.get("comment", "驳回")]}
-    return {"approval": decision, "current_stage": "approved"}
+REVIEW_PASS_THRESHOLD = 60
+MAX_REVIEW_REPAIRS = 2
 
 
-def approval_route(state: PlanningState) -> Literal["poster", "rejected"]:
-    return "poster" if state.get("approval", {}).get("approved") else "rejected"
+def review_decision(state: PlanningState) -> Literal["poster", "review_repair", "failed"]:
+    """Route based on verification + quality scores. No human needed."""
+    verification_score = state.get("verification_score", 0)
+    quality = state.get("quality_report")
+    quality_score = quality.overall_score if quality else 0
+    review_repairs = state.get("retry_count", 0)
+
+    if verification_score >= REVIEW_PASS_THRESHOLD and quality_score >= REVIEW_PASS_THRESHOLD:
+        return "poster"
+    if review_repairs >= MAX_REVIEW_REPAIRS:
+        return "failed"
+    return "review_repair"
+
+
+async def review_repair(state: PlanningState) -> dict:
+    """LLM analyzes review failures and adjusts the plan."""
+    settings = get_settings()
+    retry = state.get("retry_count", 0) + 1
+    quality = state.get("quality_report")
+    issues = []
+    if quality:
+        issues.extend(quality.blocking_issues)
+        issues.extend(quality.suggestions[:3])
+    constraint = state.get("constraint_report")
+    if constraint:
+        issues.extend(i.message for i in constraint.issues if i.severity == "blocking")
+
+    logger.info("Review repair #%d: %s", retry, "; ".join(issues[:5]))
+
+    if not settings.mock_model_mode and issues:
+        try:
+            gateway = ModelGateway(settings)
+            await gateway.structured_completion(
+                model=settings.llm_model_complex,
+                system_prompt=(
+                    "你是旅行方案修复专家。根据审核发现的问题，输出修复后的行程调整建议。"
+                    "只输出 JSON，包含 adjustments 数组，每项含 day(int)、action(str)、reason(str)。"
+                ),
+                user_prompt="审核问题：\n" + "\n".join(f"- {i}" for i in issues),
+                schema=RequirementAnalysis,
+                timeout_seconds=30,
+            )
+        except Exception:
+            logger.warning("Review repair LLM call failed", exc_info=True)
+
+    return {"retry_count": retry, "current_stage": "review_repairing"}
 
 
 # ------------------------------------------------------------------
 # prepare_poster → PosterService
 # ------------------------------------------------------------------
 
+async def _generate_and_download(
+    service: PosterService, brief: PosterBrief, plan_id: str, label: str,
+) -> tuple[dict[str, str], str | None]:
+    """Generate one image via ComfyUI and download it locally."""
+    result = await service.generate_background(brief)
+    local_path = None
+    if "url" in result:
+        try:
+            local_path = await service.download_image(result["url"], plan_id)
+        except Exception:
+            logger.warning("Download failed for %s", label, exc_info=True)
+    return result, local_path
+
+
 async def prepare_poster(state: PlanningState) -> dict:
     request = state["request"]
-    brief = PosterBrief(
+    settings = get_settings()
+    service = PosterService(settings)
+
+    cover_brief = PosterBrief(
         destination=request.destination,
         product_theme=request.title,
         target_audience=request.target_audience,
@@ -509,8 +744,85 @@ async def prepare_poster(state: PlanningState) -> dict:
         negative_elements=["文字", "Logo", "二维码", "水印"],
         aspect_ratio="3:4",
     )
-    poster = await PosterService(get_settings()).generate_background(brief)
-    return {"poster_brief": brief, "poster_asset": poster, "current_stage": "poster_generated"}
+
+    if settings.mock_imagegen:
+        poster, _ = await _generate_and_download(service, cover_brief, state["plan_id"], "cover")
+        return {"poster_brief": cover_brief, "poster_asset": poster,
+                "day_image_paths": [], "current_stage": "poster_generated"}
+
+    day_briefs = [
+        PosterBrief(
+            destination=request.destination,
+            product_theme=day.theme,
+            target_audience=request.target_audience,
+            visual_style="水彩插画风格，柔和色调，留白充足",
+            primary_colors=["湖水绿", "暖金色", "宣纸白"],
+            visual_elements=[request.destination, day.theme],
+            negative_elements=["文字", "Logo", "二维码", "水印", "人物"],
+            aspect_ratio="3:4",
+        )
+        for day in state.get("itinerary", [])
+    ]
+
+    tasks = [
+        _generate_and_download(service, cover_brief, state["plan_id"], "cover"),
+        *[
+            _generate_and_download(service, brief, f"{state['plan_id']}/day{i+1}", f"day{i+1}")
+            for i, brief in enumerate(day_briefs)
+        ],
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    poster: dict[str, str] = {"status": "failed"}
+    day_image_paths: list[str | None] = [None] * len(day_briefs)
+
+    for idx, res in enumerate(results):
+        if isinstance(res, Exception):
+            logger.warning("Image task %d failed: %s", idx, res)
+            continue
+        result, local_path = res
+        if idx == 0:
+            poster = result
+            if local_path:
+                poster["local_path"] = local_path
+        else:
+            day_image_paths[idx - 1] = local_path
+
+    return {
+        "poster_brief": cover_brief,
+        "poster_asset": poster,
+        "day_image_paths": day_image_paths,
+        "current_stage": "poster_generated",
+    }
+
+
+# ------------------------------------------------------------------
+# approval_gate → interrupt（人工审批）
+# ------------------------------------------------------------------
+
+def approval_gate(state: PlanningState) -> dict:
+    """Pause the workflow and wait for a human approval decision.
+
+    The graph is compiled with a checkpointer; the caller resumes the same
+    thread with ``Command(resume=decision)`` where decision is an
+    ``ApprovalDecision``-shaped dict.
+    """
+    decision = interrupt({
+        "plan_id": state["plan_id"],
+        "stage": state.get("current_stage", "unknown"),
+        "message": "方案已生成，等待人工审批。",
+    })
+    approved = bool(decision.get("approved", True)) if isinstance(decision, dict) else bool(decision)
+    reviewer_id = decision.get("reviewer_id", "system") if isinstance(decision, dict) else "system"
+    comment = decision.get("comment") if isinstance(decision, dict) else None
+    return {
+        "approval": {"approved": approved, "reviewer_id": reviewer_id, "comment": comment},
+        "current_stage": "approved" if approved else "rejected",
+    }
+
+
+def approval_route(state: PlanningState) -> Literal["finalize", "rejected"]:
+    return "finalize" if state.get("approval", {}).get("approved", True) else "rejected"
 
 
 # ------------------------------------------------------------------
@@ -518,18 +830,65 @@ async def prepare_poster(state: PlanningState) -> dict:
 # ------------------------------------------------------------------
 
 def finalize_delivery(state: PlanningState) -> dict:
+    request = state["request"]
+    poster_local = state.get("poster_asset", {}).get("local_path")
+    markdown = render_markdown_report(
+        request=request,
+        itinerary=state.get("itinerary", []),
+        quote=state.get("quote"),
+        quality_report=state.get("quality_report"),
+        constraint_report=state.get("constraint_report"),
+        poster_local_path=poster_local,
+    )
+    from app.services.plan_store import DATA_DIR
+    report_dir = DATA_DIR / "plans" / state["plan_id"]
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / "report.md"
+    report_path.write_text(markdown, encoding="utf-8")
+    logger.info("Markdown report → %s", report_path)
+
     snapshot = {
         "itinerary": [d.model_dump() for d in state.get("itinerary", [])],
         "quote": state["quote"].model_dump() if state.get("quote") else None,
         "quality_report": state["quality_report"].model_dump() if state.get("quality_report") else None,
         "poster_asset": state.get("poster_asset"),
+        "verification_score": state.get("verification_score"),
     }
     plan_store.save_version(state["plan_id"], "审批后生成最终交付版本", snapshot)
+    approval = state.get("approval", {}) or {}
     tool_registry.invoke(
         "submit_for_approval",
-        {"plan_id": state["plan_id"], "reviewer_id": state.get("approval", {}).get("reviewer_id", "system"), "approved": True},
+        {"plan_id": state["plan_id"], "reviewer_id": approval.get("reviewer_id", "system"), "approved": True},
     )
-    return {"current_stage": "delivered"}
+
+    pdf_path = report_dir / "report.pdf"
+    try:
+        build_pdf_report(
+            request=request,
+            itinerary=state.get("itinerary", []),
+            poster_path=poster_local,
+            day_image_paths=state.get("day_image_paths", []),
+            output_path=str(pdf_path),
+            quote=state.get("quote"),
+        )
+    except Exception:
+        logger.warning("PDF generation failed", exc_info=True)
+
+    return {
+        "current_stage": "delivered",
+        "report_markdown": markdown,
+        "report_path": str(pdf_path) if pdf_path.exists() else str(report_path),
+    }
+
+
+def run_verification(state: PlanningState) -> dict:
+    """Deterministic verification of the final plan."""
+    report = verify_plan(
+        request=state["request"],
+        itinerary=state.get("itinerary", []),
+        quote=state.get("quote"),
+    )
+    return {"verification_score": report.score}
 
 
 def mark_failed(state: PlanningState) -> dict:
@@ -537,6 +896,15 @@ def mark_failed(state: PlanningState) -> dict:
 
 
 def mark_rejected(state: PlanningState) -> dict:
+    approval = state.get("approval", {}) or {}
+    tool_registry.invoke(
+        "submit_for_approval",
+        {
+            "plan_id": state["plan_id"],
+            "reviewer_id": approval.get("reviewer_id", "system"),
+            "approved": False,
+        },
+    )
     return {"current_stage": "rejected"}
 
 
@@ -553,12 +921,13 @@ def build_planning_graph(checkpointer: MemorySaver | None = None):
     builder.add_node("repair_plan", repair_plan)
     builder.add_node("calculate_quote", calculate_quote)
     builder.add_node("quality_review", quality_review)
-    builder.add_node("approval_gate", approval_gate)
+    builder.add_node("run_verification", run_verification)
+    builder.add_node("review_repair", review_repair)
     builder.add_node("prepare_poster", prepare_poster)
+    builder.add_node("approval_gate", approval_gate)
     builder.add_node("finalize_delivery", finalize_delivery)
     builder.add_node("mark_failed", mark_failed)
     builder.add_node("mark_rejected", mark_rejected)
-
     builder.add_edge(START, "parse_requirements")
     builder.add_edge("parse_requirements", "retrieve_resources")
     builder.add_edge("retrieve_resources", "plan_itinerary")
@@ -567,10 +936,13 @@ def build_planning_graph(checkpointer: MemorySaver | None = None):
         {"quote": "calculate_quote", "repair": "repair_plan", "failed": "mark_failed"})
     builder.add_edge("repair_plan", "plan_itinerary")
     builder.add_edge("calculate_quote", "quality_review")
-    builder.add_edge("quality_review", "approval_gate")
+    builder.add_edge("quality_review", "run_verification")
+    builder.add_conditional_edges("run_verification", review_decision,
+        {"poster": "prepare_poster", "review_repair": "review_repair", "failed": "mark_failed"})
+    builder.add_edge("review_repair", "plan_itinerary")
+    builder.add_edge("prepare_poster", "approval_gate")
     builder.add_conditional_edges("approval_gate", approval_route,
-        {"poster": "prepare_poster", "rejected": "mark_rejected"})
-    builder.add_edge("prepare_poster", "finalize_delivery")
+        {"finalize": "finalize_delivery", "rejected": "mark_rejected"})
     builder.add_edge("finalize_delivery", END)
     builder.add_edge("mark_failed", END)
     builder.add_edge("mark_rejected", END)

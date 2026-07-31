@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class ProductType(StrEnum):
@@ -12,6 +12,12 @@ class ProductType(StrEnum):
     STUDY = "study_tour"
     CORPORATE = "corporate_team_building"
     SENIOR = "senior_friendly"
+
+
+class TravelPace(StrEnum):
+    INTENSE = "intense"
+    MODERATE = "moderate"
+    RELAXED = "relaxed"
 
 
 class PlanStatus(StrEnum):
@@ -24,6 +30,8 @@ class PlanStatus(StrEnum):
 
 
 class PlanRequest(BaseModel):
+    """TripSpec: structured travel requirement specification."""
+
     title: str = Field(min_length=3, max_length=120)
     product_type: ProductType
     destination: str = Field(min_length=2, max_length=80)
@@ -34,9 +42,37 @@ class PlanRequest(BaseModel):
     target_margin_rate: float = Field(default=0.15, ge=0, le=0.8)
     target_audience: str = Field(min_length=3, max_length=300)
     themes: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
-    required_resources: list[str] = Field(default_factory=list)
-    excluded_resources: list[str] = Field(default_factory=list)
+
+    pace: TravelPace = Field(default=TravelPace.MODERATE, description="旅行节奏")
+    transport_preferences: list[str] = Field(
+        default_factory=lambda: ["public_transit", "walking"],
+        description="交通偏好: walking/public_transit/driving/charter",
+    )
+    interests: list[str] = Field(default_factory=list, description="兴趣标签")
+    must_visit: list[str] = Field(default_factory=list, description="必去地点")
+    avoid: list[str] = Field(default_factory=list, description="避雷/不感兴趣")
+
+    hard_constraints: list[str] = Field(
+        default_factory=list, description="硬约束：不能违反"
+    )
+    soft_preferences: list[str] = Field(
+        default_factory=list, description="软偏好：尽量满足"
+    )
+    assumptions: list[str] = Field(
+        default_factory=list, description="Agent 做出的假设，需用户确认"
+    )
+
+    @property
+    def constraints(self) -> list[str]:
+        return self.hard_constraints + self.soft_preferences
+
+    @property
+    def required_resources(self) -> list[str]:
+        return self.must_visit
+
+    @property
+    def excluded_resources(self) -> list[str]:
+        return self.avoid
 
     @model_validator(mode="after")
     def validate_nights(self) -> PlanRequest:
@@ -61,6 +97,15 @@ class ResourceCandidate(BaseModel):
     retrieved_at: datetime | None = None
     provider: str = "internal"
     summary: str | None = None
+    images: list[str] = Field(default_factory=list)
+
+    lng: float | None = Field(default=None, description="经度 (来自高德地图)")
+    lat: float | None = Field(default=None, description="纬度 (来自高德地图)")
+
+    interest_score: float = Field(default=0.5, ge=0, le=1, description="兴趣匹配度")
+    crowd_risk: str = Field(default="unknown", description="low/medium/high/unknown")
+    weather_dependency: str = Field(default="low", description="low/medium/high")
+    composite_score: float = Field(default=0.0, description="综合排序得分")
 
 
 class ItineraryEvent(BaseModel):
@@ -81,7 +126,7 @@ class ItineraryDay(BaseModel):
 
 class ConstraintIssue(BaseModel):
     code: str
-    severity: str
+    severity: str = Field(description="blocking / warning / info")
     message: str
     event_title: str | None = None
     suggested_action: str | None = None
@@ -93,6 +138,10 @@ class ConstraintReport(BaseModel):
     issues: list[ConstraintIssue] = Field(default_factory=list)
     total_travel_minutes: int
     max_daily_minutes: int
+    must_visit_coverage: float = Field(default=0.0, ge=0, le=1, description="必去地点覆盖率")
+    budget_accuracy: float = Field(default=0.0, description="预算偏差率")
+    time_conflict_count: int = Field(default=0, description="时间冲突数")
+    opening_hours_violations: int = Field(default=0, description="营业时间违规数")
 
 
 class QuoteItem(BaseModel):
@@ -167,10 +216,10 @@ class RequirementAnalysis(BaseModel):
 
 
 class EnrichedResourceInfo(BaseModel):
-    index: int = Field(description="资源在输入列表中的序号，从 0 开始")
+    index: int = Field(default=-1, description="资源在输入列表中的序号，从 0 开始")
     category: str
     estimated_price_per_person: int = Field(ge=0)
-    recommended_minutes: int = Field(ge=30, le=480)
+    recommended_minutes: int = Field(default=120, ge=0, le=480)
     opening_hours: str
     highlights: str
 
@@ -210,7 +259,11 @@ class QualityAssessment(BaseModel):
 class TravelTimePair(BaseModel):
     from_index: int = Field(description="出发资源序号")
     to_index: int = Field(description="到达资源序号")
-    time: int = Field(ge=5, le=300, description="预估交通时间（分钟）")
+    time: int = Field(
+        ge=5, le=300,
+        description="预估交通时间（分钟）",
+        validation_alias=AliasChoices("time", "duration", "travel_time", "duration_min"),
+    )
 
 
 class TravelTimeMatrix(BaseModel):
@@ -218,20 +271,36 @@ class TravelTimeMatrix(BaseModel):
 
 
 class ScheduledEvent(BaseModel):
-    resource_id: str
-    title: str
+    resource_id: str = ""
+    title: str = ""
     start_time: str = Field(description="HH:MM 格式")
     end_time: str = Field(description="HH:MM 格式")
-    category: str
-    description: str
+    category: str = "activity"
+    description: str = ""
     practical_tips: str = ""
     cost_per_person: int = Field(ge=0, default=0)
+    activity_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("activity_name", "name", "activity", "title"),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def backfill_title(self) -> ScheduledEvent:
+        if not self.title and self.activity_name:
+            self.title = self.activity_name
+        return self
 
 
 class DailySchedule(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     day: int
-    theme: str
-    events: list[ScheduledEvent]
+    theme: str = ""
+    events: list[ScheduledEvent] = Field(
+        validation_alias=AliasChoices("events", "activities", "schedule"),
+    )
 
 
 class ScheduleBatch(BaseModel):
@@ -240,7 +309,7 @@ class ScheduleBatch(BaseModel):
 
 class CostItemEstimate(BaseModel):
     category: str
-    description: str
+    description: str = ""
     amount: int = Field(ge=0)
 
 
@@ -262,4 +331,10 @@ class PlannerConversation(BaseModel):
     target_margin_rate: float = Field(default=0.15, ge=0, le=0.8)
     target_audience: str = Field(default="")
     themes: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
+    pace: str = Field(default="moderate", description="intense/moderate/relaxed")
+    interests: list[str] = Field(default_factory=list)
+    must_visit: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+    transport_preferences: list[str] = Field(default_factory=list)
+    hard_constraints: list[str] = Field(default_factory=list)
+    soft_preferences: list[str] = Field(default_factory=list)

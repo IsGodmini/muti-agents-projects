@@ -1,9 +1,8 @@
 """Test workflow logic with mocked external services."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-from langgraph.types import Command
 
 from app.agents.graph import build_planning_graph
 from app.models.schemas import (
@@ -104,16 +103,30 @@ async def _mock_structured_completion(self, *, schema, **kwargs):
 
 
 @pytest.mark.asyncio
-async def test_graph_pauses_for_approval_and_resumes_to_delivery(monkeypatch) -> None:
+async def test_graph_runs_end_to_end_with_auto_review(monkeypatch) -> None:
+    """Graph runs fully automatically: LLM review replaces human approval."""
     monkeypatch.setenv("MOCK_MODEL_MODE", "false")
     from app.config import get_settings
     get_settings.cache_clear()
 
+    async def _mock_ainvoke(name, payload):
+        if name in ("search_attractions", "search_poi_amap", "search_nearby_restaurants"):
+            return TEST_RESOURCES
+        if name == "calculate_route_matrix":
+            ids = payload.get("resource_ids", [])
+            times = payload.get("travel_times", {})
+            matrix = {}
+            for s in ids:
+                for t in ids:
+                    if s != t:
+                        matrix[f"{s}->{t}"] = times.get(f"{s}->{t}", 30)
+            return matrix
+        return []
+
     with (
         patch(
             "app.agents.graph.tool_registry.ainvoke",
-            new_callable=AsyncMock,
-            return_value=TEST_RESOURCES,
+            side_effect=_mock_ainvoke,
         ),
         patch(
             "app.services.model_gateway.ModelGateway.structured_completion",
@@ -133,10 +146,12 @@ async def test_graph_pauses_for_approval_and_resumes_to_delivery(monkeypatch) ->
             target_margin_rate=0.15,
             target_audience="8-12岁儿童及家长",
             themes=["自然教育"],
-            constraints=["连续乘车不超过90分钟"],
+            hard_constraints=["连续乘车不超过90分钟"],
         )
 
-        paused = await graph.ainvoke(
+        from langgraph.types import Command
+
+        result = await graph.ainvoke(
             {
                 "thread_id": "test-family-plan",
                 "plan_id": "PLAN-TEST-001",
@@ -146,21 +161,97 @@ async def test_graph_pauses_for_approval_and_resumes_to_delivery(monkeypatch) ->
             config=config,
         )
 
-        assert paused["current_stage"] == "waiting_approval"
-        assert "__interrupt__" in paused
-        assert paused["constraint_report"].valid is True
-        assert paused["quote"].total_cost == 26000
+        # Graph interrupts before finalize_delivery for approval
+        assert result["current_stage"] == "poster_generated"
 
-        delivered = await graph.ainvoke(
-            Command(resume={
-                "approved": True,
-                "reviewer_id": "product-manager-01",
-                "comment": "方案通过",
-            }),
+        # Resume with approval to complete delivery
+        result = await graph.ainvoke(
+            Command(resume={"approved": True, "reviewer_id": "test-reviewer"}),
             config=config,
         )
 
-        assert delivered["current_stage"] == "delivered"
-        assert delivered["poster_asset"]["status"] == "generated"
+        assert result["current_stage"] == "delivered"
+        assert result["constraint_report"].valid is True
+        assert result["quote"].total_cost == 26000
+        assert result["verification_score"] >= 60
+        assert result["poster_asset"]["status"] == "generated"
+        assert "report_path" in result
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_graph_rejection_records_decision_and_ends(monkeypatch) -> None:
+    """Rejecting the plan records the decision and ends without delivery."""
+    monkeypatch.setenv("MOCK_MODEL_MODE", "false")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    async def _mock_ainvoke(name, payload):
+        if name in ("search_attractions", "search_poi_amap", "search_nearby_restaurants"):
+            return TEST_RESOURCES
+        if name == "calculate_route_matrix":
+            ids = payload.get("resource_ids", [])
+            times = payload.get("travel_times", {})
+            return {f"{s}->{t}": times.get(f"{s}->{t}", 30) for s in ids for t in ids if s != t}
+        return []
+
+    from app.services import plan_store as ps
+
+    recorded: list[dict] = []
+    orig_save_approval = ps.plan_store.save_approval
+
+    def _spy_save_approval(plan_id: str, decision: dict) -> dict[str, str]:
+        recorded.append({"plan_id": plan_id, "decision": decision})
+        return orig_save_approval(plan_id, decision)
+
+    with (
+        patch("app.agents.graph.tool_registry.ainvoke", side_effect=_mock_ainvoke),
+        patch(
+            "app.services.model_gateway.ModelGateway.structured_completion",
+            new=_mock_structured_completion,
+        ),
+        patch.object(ps.plan_store, "save_approval", side_effect=_spy_save_approval),
+    ):
+        graph = build_planning_graph()
+        config = {"configurable": {"thread_id": "test-reject-plan"}}
+        request = PlanRequest(
+            title="杭州两天一夜亲子研学",
+            product_type=ProductType.FAMILY,
+            destination="杭州",
+            days=2,
+            nights=1,
+            group_size=30,
+            budget_per_person=1800,
+            target_margin_rate=0.15,
+            target_audience="8-12岁儿童及家长",
+            themes=["自然教育"],
+        )
+
+        from langgraph.types import Command
+
+        result = await graph.ainvoke(
+            {
+                "thread_id": "test-reject-plan",
+                "plan_id": "PLAN-REJECT-001",
+                "request": request,
+                "current_stage": "created",
+            },
+            config=config,
+        )
+        assert result["current_stage"] == "poster_generated"
+        assert result.get("__interrupt__")
+
+        result = await graph.ainvoke(
+            Command(resume={"approved": False, "reviewer_id": "test-reviewer", "comment": "预算超支"}),
+            config=config,
+        )
+
+        assert result["current_stage"] == "rejected"
+        assert result["approval"]["approved"] is False
+        assert any(
+            rec["plan_id"] == "PLAN-REJECT-001" and rec["decision"]["approved"] is False
+            for rec in recorded
+        )
 
     get_settings.cache_clear()

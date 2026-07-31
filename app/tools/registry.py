@@ -80,7 +80,37 @@ class ToolRegistry:
         return self.get(name).invoke(payload)
 
     async def ainvoke(self, name: str, payload: dict[str, Any]) -> Any:
-        return await self.get(name).ainvoke(payload)
+        import time
+        tool = self.get(name)
+        start = time.perf_counter()
+        status = "success"
+        result = None
+        try:
+            result = await tool.ainvoke(payload)
+            return result
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            try:
+                import asyncio
+
+                from app.services.db import log_tool_invocation
+                asyncio.get_event_loop().create_task(
+                    log_tool_invocation(
+                        agent_run_id=None,
+                        tool_name=name,
+                        risk_level=tool.risk_level.value,
+                        input_payload=payload,
+                        output_payload=None,
+                        status=status,
+                        latency_ms=latency_ms,
+                    )
+                )
+            except Exception:
+                import logging as _logging
+                _logging.getLogger(__name__).debug("DB tool logging skipped", exc_info=True)
 
     def list(self) -> list[RegisteredTool]:
         return sorted(self._tools.values(), key=lambda tool: tool.name)

@@ -75,6 +75,7 @@ async def converse_until_ready() -> PlanRequest:
 
         try:
             response = await gateway.structured_completion(
+                model=settings.llm_model_multimodal,
                 system_prompt=PARSE_USER_INPUT_SYSTEM,
                 user_prompt=f"以下是目前的对话：\n{conversation_text}",
                 schema=PlannerConversation,
@@ -99,7 +100,13 @@ async def converse_until_ready() -> PlanRequest:
                 target_margin_rate=response.target_margin_rate,
                 target_audience=response.target_audience or "普通游客",
                 themes=response.themes,
-                constraints=response.constraints,
+                pace=response.pace,
+                interests=response.interests,
+                must_visit=response.must_visit,
+                avoid=response.avoid,
+                transport_preferences=response.transport_preferences or ["public_transit", "walking"],
+                hard_constraints=response.hard_constraints,
+                soft_preferences=response.soft_preferences,
             )
 
         agent_say(response.question)
@@ -109,6 +116,7 @@ async def converse_until_ready() -> PlanRequest:
             history.append("用户：信息够了，直接开始策划。")
             try:
                 final = await gateway.structured_completion(
+                    model=settings.llm_model_multimodal,
                     system_prompt=PARSE_USER_INPUT_SYSTEM,
                     user_prompt=(
                         f"以下是目前的对话：\n{chr(10).join(history)}\n\n"
@@ -129,7 +137,13 @@ async def converse_until_ready() -> PlanRequest:
                     target_margin_rate=final.target_margin_rate,
                     target_audience=final.target_audience or "普通游客",
                     themes=final.themes,
-                    constraints=final.constraints,
+                    pace=final.pace,
+                    interests=final.interests,
+                    must_visit=final.must_visit,
+                    avoid=final.avoid,
+                    transport_preferences=final.transport_preferences or ["public_transit", "walking"],
+                    hard_constraints=final.hard_constraints,
+                    soft_preferences=final.soft_preferences,
                 )
             except Exception:  # noqa: BLE001
                 error("无法生成方案，请补充目的地和天数。")
@@ -238,7 +252,7 @@ async def run_workflow(request: PlanRequest) -> None:
     print_quote(data)
     print_quality(data)
 
-    if data.get("current_stage") != "waiting_approval":
+    if not result.get("__interrupt__"):
         error(f"工作流异常: {data.get('current_stage')}")
         for err in data.get("errors", []):
             error(err)

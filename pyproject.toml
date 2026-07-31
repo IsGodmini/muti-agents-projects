@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "TripOps AI multi-agent travel product planning backend"
 requires-python = ">=3.12"
 dependencies = [
+  "asyncpg>=0.31.0",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "langgraph>=0.2,<2",
   "mcp>=1.28,<2",
   "ortools>=9.11,<10",
+  "pillow>=12.3.0",
   "pydantic-settings>=2.7,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
@@ -28,6 +30,10 @@ target-version = "py312"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "integration: requires external services (ComfyUI, LLM)",
+]
 
 [tool.mypy]
 python_version = "3.12"

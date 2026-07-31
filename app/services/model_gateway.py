@@ -45,6 +45,7 @@ class ModelGateway:
         schema: type[SchemaT],
         temperature: float = 0.2,
         timeout_seconds: float = 60,
+        image_urls: list[str] | None = None,
     ) -> SchemaT:
         if self.settings.mock_model_mode:
             raise RuntimeError("Mock mode expects deterministic graph nodes, not model calls.")
@@ -57,11 +58,18 @@ class ModelGateway:
         )
 
         api_key = self.settings.llm_api_key.get_secret_value()
+
+        user_content: str | list[dict] = user_prompt
+        if image_urls:
+            user_content = [{"type": "text", "text": user_prompt}]
+            for url in image_urls[:10]:
+                user_content.append({"type": "image_url", "image_url": {"url": url}})
+
         payload: dict = {
             "model": model or self.settings.llm_model,
             "messages": [
                 {"role": "system", "content": full_system},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content},
             ],
             "response_format": {"type": "json_object"},
             "temperature": temperature,

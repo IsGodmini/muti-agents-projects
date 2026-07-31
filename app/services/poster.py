@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,10 @@ import httpx
 from app.config import Settings
 from app.models.schemas import PosterBrief
 
+logger = logging.getLogger(__name__)
+
 _WORKFLOW_TEMPLATE_PATH = Path(__file__).parent / "comfyui" / "workflow_template.json"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 ASPECT_RATIO_SIZES: dict[str, tuple[int, int]] = {
     "3:4": (896, 1152),
@@ -53,13 +57,30 @@ class PosterService:
 
             image_info = await self._poll_history(client, base_url, prompt_id)
 
-        return {
+        result = {
             "asset_id": f"poster-{uuid4().hex[:8]}",
             "status": "generated",
             "prompt_id": prompt_id,
             "url": image_info["url"],
             "filename": image_info["filename"],
         }
+
+        return result
+
+    async def download_image(self, image_url: str, plan_id: str) -> str:
+        """Download generated image and save it to the plan directory."""
+        plan_dir = DATA_DIR / "plans" / plan_id
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(image_url.split("?")[0]).suffix or ".png"
+        local_path = plan_dir / f"poster{suffix}"
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(image_url)
+            response.raise_for_status()
+            local_path.write_bytes(response.content)
+
+        logger.info("Poster saved → %s (%d KB)", local_path, len(response.content) // 1024)
+        return str(local_path)
 
     def _build_workflow(self, brief: PosterBrief) -> dict:
         template = json.loads(_WORKFLOW_TEMPLATE_PATH.read_text(encoding="utf-8"))

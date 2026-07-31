@@ -22,6 +22,7 @@ class TavilySearchItem(BaseModel):
     content: str
     score: float = Field(ge=0, le=1)
     retrieved_at: datetime
+    images: list[str] = Field(default_factory=list)
 
 
 def parse_tavily_search_text(text: str) -> list[TavilySearchItem]:
@@ -53,12 +54,20 @@ def parse_structured_results(
     raw_results = structured_content.get("results")
     if not isinstance(raw_results, list):
         return []
+    raw_images = structured_content.get("images")
+    global_images: list[str] = []
+    if isinstance(raw_images, list):
+        global_images = [str(img) for img in raw_images if img]
 
     retrieved_at = datetime.now(UTC)
     parsed: list[TavilySearchItem] = []
     for index, raw in enumerate(raw_results):
         if not isinstance(raw, dict) or not raw.get("title") or not raw.get("url"):
             continue
+        item_images: list[str] = []
+        raw_item_images = raw.get("images")
+        if isinstance(raw_item_images, list):
+            item_images = [str(img) for img in raw_item_images if img]
         parsed.append(
             TavilySearchItem(
                 title=str(raw["title"]),
@@ -66,8 +75,15 @@ def parse_structured_results(
                 content=str(raw.get("content", "")),
                 score=float(raw.get("score", max(0.55, 0.95 - index * 0.05))),
                 retrieved_at=retrieved_at,
+                images=item_images,
             )
         )
+    if global_images and parsed:
+        per_item = max(1, len(global_images) // len(parsed))
+        for i, item in enumerate(parsed):
+            if not item.images:
+                start = i * per_item
+                item.images = global_images[start : start + per_item]
     return parsed
 
 
@@ -95,7 +111,7 @@ class TavilyMCPService:
                 "topic": "general",
                 "search_depth": self.search_depth,
                 "max_results": min(20, max(5, max_results)),
-                "include_images": False,
+                "include_images": True,
                 "include_raw_content": False,
             },
         )

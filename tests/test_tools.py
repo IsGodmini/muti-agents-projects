@@ -45,8 +45,9 @@ def test_quote_tool_computes_from_provided_items() -> None:
     assert result.margin_rate > 0
 
 
-def test_route_matrix_uses_provided_travel_times() -> None:
-    result = tool_registry.invoke(
+@pytest.mark.asyncio
+async def test_route_matrix_uses_provided_travel_times() -> None:
+    result = await tool_registry.ainvoke(
         "calculate_route_matrix",
         {
             "resource_ids": ["a", "b", "c"],
