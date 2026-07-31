@@ -158,13 +158,6 @@ def filter_resources(
         filtered.append(r)
 
     if warnings:
-        logger.warning("Guard filtered %d/%d resources: %s", len(warnings), len(resources) + len(warnings), warnings)
+        logger.warning("Guard filtered %d/%d resources: %s", len(warnings), len(resources), warnings)
 
     return filtered, warnings
-
-
-def safe_truncate(text: str, max_chars: int = 2000) -> str:
-    """Truncate text safely, avoiding injection patterns at boundaries."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n...[truncated]"

@@ -20,13 +20,13 @@
 | --- | --- | --- | --- |
 | parse_requirements | 解析用户目标和约束 | PlanRequest | 需求完整性判断 |
 | retrieve_resources | 双路检索、防护过滤、充实并排序候选资源 | 目的地、主题、人群 | ResourceCandidate[] |
-| plan_itinerary | 估算交通、优化路线、编排行程、检索餐饮 | 候选资源、天数 | ItineraryDay[]、路线矩阵 |
+| plan_itinerary | 估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵 |
 | validate_constraints | 检查空日程、时间冲突、每日跨度等硬性约束 | 行程 | ConstraintReport |
 | repair_plan | 约束失败时搜索替代资源 | 问题清单 | 补充后的资源 |
 | calculate_quote | 估算成本并计算售价 | 行程、人数、预算 | Quote |
 | quality_review | 多维度质量评分 | 完整方案 | QualityReport |
 | run_verification | 确定性可行性检查（8 项） | 行程 + 报价 | 验证得分 |
-| review_repair | 审核不达标时生成修复建议并重试 | 审核问题 | 重试计数 |
+| review_repair | 审核不达标时重排行程（重试环路） | 审核问题 | 重试计数 |
 | prepare_poster | 生成封面/分日海报视觉资产 | 方案 Brief | 海报资产 + 本地图片 |
 | approval_gate | 人工审批中断（`interrupt()`） | 方案 + 审批载荷 | 审批决定 |
 | finalize_delivery | 生成报告/PDF、存档版本与审批记录 | 已批准方案 | 交付结果 |
@@ -59,10 +59,10 @@ flowchart TD
     RJ --> E
 ```
 
-两个返工环路都由 `retry_count` 限制：
+两个返工环路（`repair_plan` 与 `review_repair`）共用 `retry_count` 计数，合计最多 2 次：
 
-- `repair_plan → plan_itinerary`：约束校验失败后补充替代资源，最多 2 次。
-- `review_repair → plan_itinerary`：质量/可行性审核不达标后重排，最多 2 次。
+- `repair_plan → plan_itinerary`：约束校验失败后补充替代资源。
+- `review_repair → plan_itinerary`：质量/可行性审核不达标后重排。
 
 ## 4. `PlanningState`
 

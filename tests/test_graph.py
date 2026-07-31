@@ -107,7 +107,7 @@ async def test_graph_runs_end_to_end_with_auto_review(monkeypatch) -> None:
     get_settings.cache_clear()
 
     async def _mock_ainvoke(name, payload):
-        if name in ("search_attractions", "search_poi_amap", "search_nearby_restaurants"):
+        if name in ("search_attractions", "search_poi_amap"):
             return TEST_RESOURCES
         if name == "calculate_route_matrix":
             ids = payload.get("resource_ids", [])
@@ -185,7 +185,7 @@ async def test_graph_rejection_records_decision_and_ends(monkeypatch) -> None:
     get_settings.cache_clear()
 
     async def _mock_ainvoke(name, payload):
-        if name in ("search_attractions", "search_poi_amap", "search_nearby_restaurants"):
+        if name in ("search_attractions", "search_poi_amap"):
             return TEST_RESOURCES
         if name == "calculate_route_matrix":
             ids = payload.get("resource_ids", [])

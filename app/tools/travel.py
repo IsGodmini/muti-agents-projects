@@ -40,33 +40,6 @@ async def search_poi_amap(payload: AmapPOISearchInput) -> list[ResourceCandidate
     return [_place_to_resource(p) for p in places]
 
 
-class NearbySearchInput(BaseModel):
-    location: str = Field(description="lng,lat")
-    keywords: str = ""
-    types: str = Field(default="050000", description="POI type code, 050000=餐饮")
-    radius: int = Field(default=3000, ge=500, le=50000)
-    limit: int = Field(default=5, ge=1, le=25)
-
-
-@tool_registry.register(
-    name="search_nearby_restaurants",
-    description="Search nearby restaurants via Gaode Maps.",
-    category="geo_search",
-    risk_level=ToolRisk.READ_ONLY,
-    input_model=NearbySearchInput,
-)
-async def search_nearby_restaurants(payload: NearbySearchInput) -> list[ResourceCandidate]:
-    settings = get_settings()
-    if not settings.amap_api_key:
-        return []
-    client = AmapClient(settings.amap_api_key, settings.amap_base_url)
-    places = await client.search_nearby(
-        payload.location, keywords=payload.keywords, types=payload.types,
-        radius=payload.radius, limit=payload.limit,
-    )
-    return [_place_to_resource(p) for p in places]
-
-
 def _place_to_resource(place) -> ResourceCandidate:
     from app.services.tools.base import Place
     assert isinstance(place, Place)
@@ -149,6 +122,7 @@ async def search_attractions(payload: SearchResourcesInput) -> list[ResourceCand
             images=item.images[:3] if item.images else [],
         ))
     return resources
+
 
 
 # ------------------------------------------------------------------
@@ -315,24 +289,6 @@ def calculate_product_cost(payload: QuoteInput) -> Quote:
         expected_profit=profit,
         margin_rate=round(profit / revenue, 4) if revenue else 0,
     )
-
-
-class SaveVersionInput(BaseModel):
-    plan_id: str
-    reason: str
-
-
-@tool_registry.register(
-    name="save_plan_version",
-    description="Persist a new immutable plan version to disk.",
-    category="versioning",
-    risk_level=ToolRisk.WRITE_INTERNAL,
-    input_model=SaveVersionInput,
-)
-def save_plan_version(payload: SaveVersionInput) -> dict[str, str]:
-    from app.services.plan_store import plan_store
-
-    return plan_store.save_version(payload.plan_id, payload.reason, {})
 
 
 class ApprovalInput(BaseModel):

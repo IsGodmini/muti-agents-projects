@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     llm_model_multimodal: str = "Doubao-Seed-2.1-turbo"
 
     imagegen_api_url: str = "http://10.29.248.167:8188"
-    mock_imagegen: bool = False
+    mock_imagegen: bool = True
 
     mock_model_mode: bool = False
 

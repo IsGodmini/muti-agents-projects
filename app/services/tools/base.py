@@ -64,10 +64,3 @@ class Place(BaseModel):
     summary: str | None = None
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     provider: str = "internal"
-
-    @property
-    def has_verified_hours(self) -> bool:
-        return bool(self.opening_hours) or (
-            self.opening_hours_text is not None
-            and not self.opening_hours_text.is_estimated
-        )

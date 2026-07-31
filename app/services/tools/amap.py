@@ -52,44 +52,6 @@ class AmapClient:
         pois = data.get("pois", [])
         return [self._poi_to_place(poi) for poi in pois]
 
-    async def search_nearby(
-        self,
-        location: str,
-        keywords: str = "",
-        types: str = "",
-        radius: int = 3000,
-        limit: int = 10,
-    ) -> list[Place]:
-        """Search POIs around a coordinate. location format: 'lng,lat'."""
-        params: dict = {
-            "key": self.api_key,
-            "location": location,
-            "radius": radius,
-            "output": "json",
-            "offset": min(limit, 25),
-            "extensions": "all",
-        }
-        if keywords:
-            params["keywords"] = keywords
-        if types:
-            params["types"] = types
-
-        data = await self._get("/place/around", params)
-        pois = data.get("pois", [])
-        return [self._poi_to_place(poi) for poi in pois]
-
-    async def geocode(self, address: str, city: str = "") -> GeoPoint | None:
-        """Convert address to coordinates."""
-        params: dict = {"key": self.api_key, "address": address, "output": "json"}
-        if city:
-            params["city"] = city
-        data = await self._get("/geocode/geo", params)
-        geocodes = data.get("geocodes", [])
-        if geocodes and geocodes[0].get("location"):
-            lng, lat = geocodes[0]["location"].split(",")
-            return GeoPoint(lat=float(lat), lng=float(lng))
-        return None
-
     async def travel_time(
         self,
         origin: str,

@@ -124,6 +124,14 @@ async def run_plan(request: PlanRequest) -> PlanRunResponse:
         },
         config=config,
     )
+    if result.get("current_stage") == "failed":
+        return PlanRunResponse(
+            thread_id=thread_id,
+            status=PlanStatus.FAILED,
+            current_stage="failed",
+            message="方案未通过校验，执行失败。",
+            data=jsonable_encoder(result),
+        )
     return PlanRunResponse(
         thread_id=thread_id,
         status=PlanStatus.WAITING_APPROVAL,

@@ -12,7 +12,7 @@
   review_decision      → (auto approve / repair loop)
   prepare_poster       → PosterService
   approval_gate        → interrupt（人工审批，批准/驳回）
-  finalize_delivery    → save_plan_version, submit_for_approval
+  finalize_delivery    → plan_store.save_version + submit_for_approval
   mark_rejected        → submit_for_approval（记录驳回决定）
 """
 
@@ -253,7 +253,6 @@ async def plan_itinerary(state: PlanningState) -> dict:
         },
     )
 
-    await _search_dining_options(settings, request, resources)
 
     if not settings.mock_model_mode:
         try:
@@ -264,32 +263,6 @@ async def plan_itinerary(state: PlanningState) -> dict:
 
     days = _basic_schedule(request, optimized, resource_map)
     return {"itinerary": days, "route_matrix": route_matrix, "current_stage": "itinerary_planned"}
-
-
-async def _search_dining_options(settings, request, resources) -> list:
-    """Search nearby restaurants around the first resource with coordinates."""
-    if not settings.amap_api_key:
-        return []
-    anchor = next((r for r in resources if r.lng and r.lat), None)
-    if not anchor:
-        return []
-    try:
-        restaurants = await tool_registry.ainvoke(
-            "search_nearby_restaurants",
-            {
-                "location": f"{anchor.lng},{anchor.lat}",
-                "keywords": request.destination,
-                "types": "050000",
-                "radius": 5000,
-                "limit": 5,
-            },
-        )
-        if restaurants:
-            logger.info("Found %d dining options near %s", len(restaurants), anchor.name)
-        return restaurants
-    except Exception:
-        logger.warning("Restaurant search failed", exc_info=True)
-        return []
 
 
 async def _estimate_travel_times(settings, resources) -> dict[str, int]:
@@ -497,7 +470,6 @@ def validate_constraints(state: PlanningState) -> dict:
         budget_accuracy = abs(quote.total_cost - budget_total) / max(budget_total, 1)
 
     route_matrix = state.get("route_matrix", {})
-    opening_violations = sum(1 for i in issues if i.code == "OPENING_HOURS")
     report = ConstraintReport(
         valid=not any(i.severity == "blocking" for i in issues),
         score=max(70, 100 - len(issues) * 8),
@@ -507,7 +479,6 @@ def validate_constraints(state: PlanningState) -> dict:
         must_visit_coverage=round(must_visit_coverage, 2),
         budget_accuracy=round(budget_accuracy, 4),
         time_conflict_count=time_conflict_count,
-        opening_hours_violations=opening_violations,
     )
     return {"constraint_report": report, "current_stage": "constraints_validated"}
 
@@ -613,7 +584,7 @@ async def quality_review(state: PlanningState) -> dict:
     settings = get_settings()
     if not settings.mock_model_mode:
         report = await _llm_quality_review(settings, state)
-        return {"quality_report": report, "current_stage": "waiting_approval"}
+        return {"quality_report": report}
     raise RuntimeError("Quality review requires LLM.")
 
 
@@ -678,8 +649,11 @@ def review_decision(state: PlanningState) -> Literal["poster", "review_repair", 
 
 
 async def review_repair(state: PlanningState) -> dict:
-    """LLM analyzes review failures and adjusts the plan."""
-    settings = get_settings()
+    """Re-plan trigger after quality/verification failure.
+
+    The actual rework happens downstream: this node only advances the
+    shared ``retry_count`` and routes back to ``plan_itinerary``.
+    """
     retry = state.get("retry_count", 0) + 1
     quality = state.get("quality_report")
     issues = []
@@ -691,23 +665,6 @@ async def review_repair(state: PlanningState) -> dict:
         issues.extend(i.message for i in constraint.issues if i.severity == "blocking")
 
     logger.info("Review repair #%d: %s", retry, "; ".join(issues[:5]))
-
-    if not settings.mock_model_mode and issues:
-        try:
-            gateway = ModelGateway(settings)
-            await gateway.structured_completion(
-                model=settings.llm_model_complex,
-                system_prompt=(
-                    "你是旅行方案修复专家。根据审核发现的问题，输出修复后的行程调整建议。"
-                    "只输出 JSON，包含 adjustments 数组，每项含 day(int)、action(str)、reason(str)。"
-                ),
-                user_prompt="审核问题：\n" + "\n".join(f"- {i}" for i in issues),
-                schema=RequirementAnalysis,
-                timeout_seconds=30,
-            )
-        except Exception:
-            logger.warning("Review repair LLM call failed", exc_info=True)
-
     return {"retry_count": retry, "current_stage": "review_repairing"}
 
 
@@ -826,7 +783,7 @@ def approval_route(state: PlanningState) -> Literal["finalize", "rejected"]:
 
 
 # ------------------------------------------------------------------
-# finalize_delivery → save_plan_version + submit_for_approval
+# finalize_delivery → plan_store.save_version + submit_for_approval
 # ------------------------------------------------------------------
 
 def finalize_delivery(state: PlanningState) -> dict:
@@ -892,7 +849,7 @@ def run_verification(state: PlanningState) -> dict:
 
 
 def mark_failed(state: PlanningState) -> dict:
-    return {"current_stage": "failed", "errors": state.get("errors", []) + ["约束在最大重试次数内未通过。"]}
+    return {"current_stage": "failed", "errors": state.get("errors", []) + ["方案在最大重试次数内未通过校验。"]}
 
 
 def mark_rejected(state: PlanningState) -> dict:

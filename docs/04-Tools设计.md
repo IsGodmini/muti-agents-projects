@@ -36,17 +36,15 @@ Registry 同时提供：
 
 若错误地用 `invoke` 调用异步工具，Registry 会立即报错，避免未等待的协程进入工作流。`ainvoke` 用于所有异步 I/O 工具（如 MCP 网络调用）。
 
-## 3. 当前工具清单（8 个）
+## 3. 当前工具清单（6 个）
 
 | Tool | 作用 | 风险 | 类型 | 分类 |
 | --- | --- | --- | --- | --- |
 | `search_attractions` | 通过 Tavily Remote MCP 检索目的地网页资源 | READ_ONLY | 异步 | mcp_search |
 | `search_poi_amap` | 高德 POI 结构化检索（坐标、评分、分类） | READ_ONLY | 异步 | geo_search |
-| `search_nearby_restaurants` | 高德周边餐饮检索（行程编排用） | READ_ONLY | 异步 | geo_search |
 | `calculate_route_matrix` | 合并高德真实时长与 LLM 估算，构造完整交通矩阵 | READ_ONLY | 异步 | geo_compute |
 | `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并按天分组 | WRITE_INTERNAL | 同步 | optimization |
 | `calculate_product_cost` | 从 LLM 估算的成本明细计算售价与毛利 | READ_ONLY | 同步 | pricing |
-| `save_plan_version` | 保存不可变方案版本快照 | WRITE_INTERNAL | 同步 | versioning |
 | `submit_for_approval` | 持久化人工审批决定 | EXTERNAL_ACTION | 同步 | approval |
 
 风险分级：
@@ -60,10 +58,10 @@ Registry 同时提供：
 | 节点 | 绑定的工具 |
 | --- | --- |
 | retrieve_resources | search_attractions、search_poi_amap |
-| plan_itinerary | calculate_route_matrix（内部调用高德真实时长）、optimize_itinerary、search_nearby_restaurants |
+| plan_itinerary | calculate_route_matrix（内部调用高德真实时长）、optimize_itinerary |
 | repair_plan | search_attractions |
 | calculate_quote | calculate_product_cost |
-| finalize_delivery | save_plan_version、submit_for_approval |
+| finalize_delivery | submit_for_approval（版本快照由节点直接写入 PlanStore） |
 
 其余节点（parse_requirements、validate_constraints、quality_review、run_verification、review_repair、prepare_poster）不经过 Tool Registry，分别由 LLM、确定性规则或适配器完成。
 

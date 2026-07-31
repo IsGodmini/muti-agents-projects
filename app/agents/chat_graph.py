@@ -6,7 +6,7 @@ then produces a structured PlanRequest when enough info is gathered.
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -18,8 +18,6 @@ from app.services.model_gateway import ModelGateway
 
 logger = logging.getLogger(__name__)
 
-
-from typing import Any, TypedDict
 
 
 class ChatState(TypedDict, total=False):
@@ -109,13 +107,9 @@ def _conversation_to_request(conv: PlannerConversation) -> dict:
     }
 
 
-def route_chat(state: ChatState) -> Literal["end", "continue"]:
-    return "end" if state.get("ready") else "continue"
-
-
 def build_chat_graph(checkpointer: MemorySaver | None = None):
     builder = StateGraph(ChatState)
     builder.add_node("chat", chat_node)
     builder.add_edge(START, "chat")
-    builder.add_conditional_edges("chat", route_chat, {"end": END, "continue": END})
+    builder.add_edge("chat", END)
     return builder.compile(checkpointer=checkpointer or MemorySaver())

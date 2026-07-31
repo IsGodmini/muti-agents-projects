@@ -50,14 +50,6 @@ class PlanStore:
         logger.info("Saved approval for %s → %s", plan_id, path)
         return {"plan_id": plan_id, "status": "recorded", "path": str(path)}
 
-    def load_latest_version(self, plan_id: str) -> dict | None:
-        plan_dir = self.data_dir / "plans" / plan_id
-        if not plan_dir.exists():
-            return None
-        versions = sorted(plan_dir.glob("v*.json"))
-        if not versions:
-            return None
-        return json.loads(versions[-1].read_text(encoding="utf-8"))
 
 
 plan_store = PlanStore()

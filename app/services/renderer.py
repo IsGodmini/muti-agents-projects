@@ -51,8 +51,6 @@ def render_markdown_report(
         for event in day.events:
             if event.description and event.category not in ("logistics", "break"):
                 lines.append(f"**{event.title}**: {event.description}")
-                if hasattr(event, "practical_tips") and event.practical_tips:
-                    lines.append(f"  - 💡 {event.practical_tips}")
                 lines.append("")
 
     if quote:

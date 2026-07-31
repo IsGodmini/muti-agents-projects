@@ -141,7 +141,6 @@ class ConstraintReport(BaseModel):
     must_visit_coverage: float = Field(default=0.0, ge=0, le=1, description="必去地点覆盖率")
     budget_accuracy: float = Field(default=0.0, description="预算偏差率")
     time_conflict_count: int = Field(default=0, description="时间冲突数")
-    opening_hours_violations: int = Field(default=0, description="营业时间违规数")
 
 
 class QuoteItem(BaseModel):
@@ -258,7 +257,6 @@ class ScheduledEvent(BaseModel):
     end_time: str = Field(description="HH:MM 格式")
     category: str = "activity"
     description: str = ""
-    practical_tips: str = ""
     cost_per_person: int = Field(ge=0, default=0)
     activity_name: str = Field(
         default="",
