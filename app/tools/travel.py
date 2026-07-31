@@ -295,6 +295,7 @@ class ApprovalInput(BaseModel):
     plan_id: str
     reviewer_id: str
     approved: bool
+    comment: str | None = None
 
 
 @tool_registry.register(
@@ -309,10 +310,11 @@ def submit_for_approval(payload: ApprovalInput) -> dict[str, str | bool]:
 
     plan_store.save_approval(
         payload.plan_id,
-        {"reviewer_id": payload.reviewer_id, "approved": payload.approved},
+        {"reviewer_id": payload.reviewer_id, "approved": payload.approved, "comment": payload.comment},
     )
     return {
         "plan_id": payload.plan_id,
         "reviewer_id": payload.reviewer_id,
         "approved": payload.approved,
+        "comment": payload.comment,
     }

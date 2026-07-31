@@ -53,6 +53,23 @@ def render_markdown_report(
                 lines.append(f"**{event.title}**: {event.description}")
                 lines.append("")
 
+    if constraint_report:
+        lines.append("## 约束校验")
+        lines.append("")
+        lines.append(f"- 校验结果: {'✅ 通过' if constraint_report.valid else '⛔ 未通过'}（得分 {constraint_report.score}/100）")
+        lines.append(f"- 每日最长跨度: {constraint_report.max_daily_minutes} 分钟")
+        lines.append(f"- 全程交通时间: {constraint_report.total_travel_minutes} 分钟")
+        if constraint_report.must_visit_coverage < 1:
+            lines.append(f"- 必去覆盖: {constraint_report.must_visit_coverage:.0%}")
+        if constraint_report.time_conflict_count:
+            lines.append(f"- 时间冲突: {constraint_report.time_conflict_count} 处")
+        if constraint_report.issues:
+            lines.append("")
+            lines.append("**待关注问题:**")
+            for issue in constraint_report.issues:
+                lines.append(f"- [{issue.severity}] {issue.message}")
+        lines.append("")
+
     if quote:
         lines.append("## 预算明细")
         lines.append("")

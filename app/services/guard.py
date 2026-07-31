@@ -101,9 +101,9 @@ def is_safe_url(url: str) -> tuple[bool, str]:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
 
-        # Check blocked domains
+        # Check blocked domains (exact match or subdomain suffix, not substring)
         for blocked in BLOCKED_DOMAINS:
-            if blocked in domain:
+            if domain == blocked or domain.endswith(f".{blocked}"):
                 return False, f"Blocked domain: {blocked}"
 
         # Check safe domains

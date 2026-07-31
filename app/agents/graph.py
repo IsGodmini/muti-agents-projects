@@ -287,7 +287,7 @@ async def _estimate_travel_times(settings, resources) -> dict[str, int]:
                     )
                 )
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        for key, result in zip(keys, results):
+        for key, result in zip(keys, results, strict=True):
             travel_times[key] = result if isinstance(result, int) else 30
         logger.info("Amap real travel times: %d pairs", len(travel_times))
 
@@ -678,7 +678,7 @@ async def _generate_and_download(
     """Generate one image via ComfyUI and download it locally."""
     result = await service.generate_background(brief)
     local_path = None
-    if "url" in result:
+    if "url" in result and not service.settings.mock_imagegen:
         try:
             local_path = await service.download_image(result["url"], plan_id)
         except Exception:
@@ -815,7 +815,12 @@ def finalize_delivery(state: PlanningState) -> dict:
     approval = state.get("approval", {}) or {}
     tool_registry.invoke(
         "submit_for_approval",
-        {"plan_id": state["plan_id"], "reviewer_id": approval.get("reviewer_id", "system"), "approved": True},
+        {
+            "plan_id": state["plan_id"],
+            "reviewer_id": approval.get("reviewer_id", "system"),
+            "approved": True,
+            "comment": approval.get("comment"),
+        },
     )
 
     pdf_path = report_dir / "report.pdf"
@@ -860,6 +865,7 @@ def mark_rejected(state: PlanningState) -> dict:
             "plan_id": state["plan_id"],
             "reviewer_id": approval.get("reviewer_id", "system"),
             "approved": False,
+            "comment": approval.get("comment"),
         },
     )
     return {"current_stage": "rejected"}

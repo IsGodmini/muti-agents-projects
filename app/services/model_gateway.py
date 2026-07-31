@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import TypeVar
 
@@ -93,21 +94,35 @@ class ModelGateway:
 
 
 def _extract_json(text: str) -> str:
-    """Strip markdown fences or thinking blocks that the model may include."""
+    """Return the first complete JSON value embedded in the model response.
+
+    Strips markdown fences and any leading/trailing non-JSON text.
+    """
     text = text.strip()
     if "```" in text:
-        parts = text.split("```")
-        for part in parts:
+        for part in text.split("```"):
             candidate = part.strip()
             if candidate.startswith("json"):
                 candidate = candidate[4:].strip()
             if candidate.startswith(("{", "[")):
-                return candidate
-    if text.startswith(("{", "[")):
-        return text
-    start = text.find("{")
-    if start == -1:
-        start = text.find("[")
+                text = candidate
+                break
+    text = text.strip()
+
+    def _first_json_value(raw: str) -> str | None:
+        try:
+            decoded, end = json.JSONDecoder().raw_decode(raw)
+        except json.JSONDecodeError:
+            return None
+        return raw[:end] if isinstance(decoded, (dict, list)) else None
+
+    exact = _first_json_value(text)
+    if exact is not None:
+        return exact
+    start = min(filter(lambda i: i != -1, (text.find("{"), text.find("["))), default=-1)
     if start == -1:
         raise ValueError(f"No JSON found in model response: {text[:200]}")
+    from_start = _first_json_value(text[start:])
+    if from_start is not None:
+        return from_start
     return text[start:]
