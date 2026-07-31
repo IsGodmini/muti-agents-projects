@@ -92,6 +92,7 @@ def _build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
     )
     draw.text((40, PAGE_HEIGHT - 120), subtitle, font=sub_font, fill=(220, 220, 220))
     draw.text((40, PAGE_HEIGHT - 85), "TripOps AI · 智能旅行策划", font=sub_font, fill=(180, 180, 180))
+    draw.text((40, PAGE_HEIGHT - 50), "* 部分数据为 AI 估算，实际以官方/供应商渠道为准 *", font=sub_font, fill=(150, 150, 150))
 
     return img
 
@@ -151,6 +152,7 @@ def _build_day_page(
         draw.text((40, y), f"总成本: ¥{quote.total_cost:,}  |  人均售价: ¥{quote.sale_price_per_person:,}  |  毛利率: {quote.margin_rate:.1%}",
                   font=small_font, fill=(200, 200, 200))
 
+    draw.text((40, PAGE_HEIGHT - 62), "* 部分数据为 AI 估算，实际以官方/供应商渠道为准 *", font=small_font, fill=(150, 150, 150))
     draw.text((40, PAGE_HEIGHT - 40), "TripOps AI", font=small_font, fill=(150, 150, 150))
 
     return img
