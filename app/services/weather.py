@@ -26,30 +26,25 @@ class WeatherClient:
         date, text_day, temp_max, temp_min, wind_scale_day, humidity.
         """
         params = {"location": location, "key": self.api_key}
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(
-                    f"{self.base_url}/weather/{days}d",
-                    params=params,
-                )
-                response.raise_for_status()
-                data = response.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.base_url}/weather/{days}d",
+                params=params,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-            if data.get("code") != "200":
-                logger.warning("Weather API error: code=%s", data.get("code"))
-                return []
+        if data.get("code") != "200":
+            raise RuntimeError(f"Weather API error: code={data.get('code')}")
 
-            forecasts: list[dict] = []
-            for day in data.get("daily", []):
-                forecasts.append({
-                    "date": day.get("fxDate", ""),
-                    "text_day": day.get("textDay", "未知"),
-                    "temp_max": int(day.get("tempMax", 25)),
-                    "temp_min": int(day.get("tempMin", 15)),
-                    "wind_scale_day": day.get("windScaleDay", "3-4"),
-                    "humidity": int(day.get("humidity", 60)),
-                })
-            return forecasts
-        except Exception:
-            logger.warning("Weather API call failed for %s", location, exc_info=True)
-            return []
+        forecasts: list[dict] = []
+        for day in data.get("daily", []):
+            forecasts.append({
+                "date": day.get("fxDate", ""),
+                "text_day": day.get("textDay", "未知"),
+                "temp_max": int(day.get("tempMax", 25)),
+                "temp_min": int(day.get("tempMin", 15)),
+                "wind_scale_day": day.get("windScaleDay", "3-4"),
+                "humidity": int(day.get("humidity", 60)),
+            })
+        return forecasts

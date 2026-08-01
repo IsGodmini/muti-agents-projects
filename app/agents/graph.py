@@ -85,12 +85,10 @@ async def retrieve_resources(state: PlanningState) -> dict:
         {"keywords": amap_keywords, "city": request.destination, "limit": 10},
     )
 
-    results = await asyncio.gather(tavily_task, amap_task, return_exceptions=True)
-    resources = []
+    results = await asyncio.gather(tavily_task, amap_task)
+    resources: list = []
     for res in results:
-        if isinstance(res, Exception):
-            logger.warning("Search source failed: %s", res)
-        elif isinstance(res, list):
+        if isinstance(res, list):
             resources.extend(res)
 
     seen_names: set[str] = set()
@@ -107,10 +105,7 @@ async def retrieve_resources(state: PlanningState) -> dict:
         logger.warning("Guard: %s", w)
 
     if not settings.mock_model_mode and resources:
-        try:
-            resources = await _enrich_resources(settings, resources)
-        except Exception:
-            logger.warning("LLM resource enrichment failed", exc_info=True)
+        resources = await _enrich_resources(settings, resources)
 
     resources = score_resources(resources, request)
 
@@ -211,18 +206,9 @@ async def plan_itinerary(state: PlanningState) -> dict:
 
 
     if not settings.mock_model_mode:
-        try:
-            days = await _generate_schedule(settings, request, optimized, resource_map, weather)
-            return {
-                "itinerary": days,
-                "route_matrix": route_matrix,
-                "weather_forecast": weather,
-                "current_stage": "itinerary_planned",
-            }
-        except Exception:
-            logger.warning("LLM schedule generation failed; using basic layout", exc_info=True)
-
-    days = _basic_schedule(request, optimized, resource_map)
+        days = await _generate_schedule(settings, request, optimized, resource_map, weather)
+    else:
+        days = _basic_schedule(request, optimized, resource_map)
     return {
         "itinerary": days,
         "route_matrix": route_matrix,
@@ -252,33 +238,30 @@ async def _estimate_travel_times(settings, resources) -> dict[str, int]:
                         mode="transit",
                     )
                 )
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
         for key, result in zip(keys, results, strict=True):
-            travel_times[key] = result if isinstance(result, int) else 30
+            travel_times[key] = result
         logger.info("Amap real travel times: %d pairs", len(travel_times))
 
     needs_llm = not settings.mock_model_mode and (
         len(coords_available) < 2 or len(travel_times) < len(resources) * (len(resources) - 1) // 2
     )
     if needs_llm:
-        try:
-            gateway = ModelGateway(settings)
-            resource_list = "\n".join(f"[{i}] {r.name}（{r.location}）" for i, r in enumerate(resources))
-            matrix = await gateway.structured_completion(
-                model=settings.llm_model_complex,
-                system_prompt=TRAVEL_TIME_SYSTEM,
-                user_prompt=f"资源列表（共 {len(resources)} 个）：\n{resource_list}",
-                schema=TravelTimeMatrix,
-                timeout_seconds=45,
-            )
-            for pair in matrix.pairs:
-                if 0 <= pair.from_index < len(resources) and 0 <= pair.to_index < len(resources):
-                    key = f"{resources[pair.from_index].id}->{resources[pair.to_index].id}"
-                    if key not in travel_times:
-                        travel_times[key] = pair.time
-            logger.info("LLM estimated travel times, total pairs: %d", len(travel_times))
-        except Exception:
-            logger.warning("LLM travel time estimation failed", exc_info=True)
+        gateway = ModelGateway(settings)
+        resource_list = "\n".join(f"[{i}] {r.name}（{r.location}）" for i, r in enumerate(resources))
+        matrix = await gateway.structured_completion(
+            model=settings.llm_model_complex,
+            system_prompt=TRAVEL_TIME_SYSTEM,
+            user_prompt=f"资源列表（共 {len(resources)} 个）：\n{resource_list}",
+            schema=TravelTimeMatrix,
+            timeout_seconds=45,
+        )
+        for pair in matrix.pairs:
+            if 0 <= pair.from_index < len(resources) and 0 <= pair.to_index < len(resources):
+                key = f"{resources[pair.from_index].id}->{resources[pair.to_index].id}"
+                if key not in travel_times:
+                    travel_times[key] = pair.time
+        logger.info("LLM estimated travel times, total pairs: %d", len(travel_times))
 
     return travel_times
 
@@ -735,13 +718,10 @@ async def prepare_poster(state: PlanningState) -> dict:
             label = f"day{day.day}" if j == 0 else f"day{day.day}-{j + 1}"
             tasks.append((day_index, _generate_and_download(service, brief, state["plan_id"], label)))
 
-    results = await asyncio.gather(*(t for _, t in tasks), return_exceptions=True)
+    results = await asyncio.gather(*(t for _, t in tasks))
 
     poster: dict[str, str] = {"status": "failed"}
     for (day_index, _), res in zip(tasks, results, strict=True):
-        if isinstance(res, Exception):
-            logger.warning("Image task failed: %s", res)
-            continue
         result, local_path = res
         if day_index == -1:
             poster = result
@@ -873,17 +853,14 @@ def finalize_delivery(state: PlanningState) -> dict:
     )
 
     pdf_path = report_dir / "report.pdf"
-    try:
-        build_pdf_report(
-            request=request,
-            itinerary=state.get("itinerary", []),
-            poster_path=poster_local,
-            day_image_paths=state.get("day_image_paths", []),
-            output_path=str(pdf_path),
-            quote=state.get("quote"),
-        )
-    except Exception:
-        logger.warning("PDF generation failed", exc_info=True)
+    build_pdf_report(
+        request=request,
+        itinerary=state.get("itinerary", []),
+        poster_path=poster_local,
+        day_image_paths=state.get("day_image_paths", []),
+        output_path=str(pdf_path),
+        quote=state.get("quote"),
+    )
 
     return {
         "current_stage": "delivered",

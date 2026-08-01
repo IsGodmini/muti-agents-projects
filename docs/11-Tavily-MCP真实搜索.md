@@ -98,7 +98,7 @@ Tavily MCP 的搜索结果支持两种解析：
 失败处理分两层：
 
 - **工具层**：未配置 API Key 或 `TAVILY_SEARCH_ENABLED=false` 时，`search_attractions` 明确抛出 `MCPToolError`，不静默降级到演示数据。
-- **节点层**：`retrieve_resources` 与高德 POI 双路并行检索（`asyncio.gather(return_exceptions=True)`），单路失败记录警告，另一路结果继续使用；两路都失败时资源列表为空并由后续节点容错。
+- **节点层**：`retrieve_resources` 与高德 POI 双路并行检索，**任一检索源失败即抛出异常**，工作流终止并向 API/前端返回错误。
 
 > 早期版本在 `app/config.py` 中保留过 `tavily_fallback_to_demo` 字段，现已移除；`tests/conftest.py` 中设置的 `TAVILY_FALLBACK_TO_DEMO` 环境变量会被配置忽略，测试通过 Mock 工具实现离线运行。
 

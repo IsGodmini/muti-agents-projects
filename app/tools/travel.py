@@ -34,7 +34,7 @@ class AmapPOISearchInput(BaseModel):
 async def search_poi_amap(payload: AmapPOISearchInput) -> list[ResourceCandidate]:
     settings = get_settings()
     if not settings.amap_api_key:
-        return []
+        raise MCPToolError("Amap POI search requires AMAP_API_KEY")
     client = AmapClient(settings.amap_api_key, settings.amap_base_url)
     places = await client.search_poi(payload.keywords, city=payload.city, types=payload.types, limit=payload.limit)
     return [_place_to_resource(p) for p in places]
@@ -76,7 +76,7 @@ class WeatherForecastInput(BaseModel):
 async def get_weather_forecast(payload: WeatherForecastInput) -> list[dict]:
     settings = get_settings()
     if not settings.weather_api_key:
-        return []
+        raise MCPToolError("Weather forecast requires WEATHER_API_KEY")
     from app.services.weather import WeatherClient
 
     client = WeatherClient(settings.weather_api_key, settings.weather_base_url)
@@ -198,23 +198,18 @@ async def calculate_route_matrix(payload: RouteMatrixInput) -> dict[str, int]:
 
         async def _fetch(src: str, tgt: str) -> tuple[str, int]:
             key = f"{src}->{tgt}"
-            try:
-                minutes = await client.travel_time(
-                    payload.coordinates[src],
-                    payload.coordinates[tgt],
-                    mode=payload.mode,
-                    city=payload.city,
-                )
-                return key, minutes
-            except Exception:  # noqa: BLE001 - Amap failures fall back to estimates
-                logger.warning("Amap travel_time failed for %s", key)
-                return key, payload.travel_times.get(key, 30)
+            minutes = await client.travel_time(
+                payload.coordinates[src],
+                payload.coordinates[tgt],
+                mode=payload.mode,
+                city=payload.city,
+            )
+            return key, minutes
 
         tasks = [_fetch(src, tgt) for src, tgt in pairs_to_fetch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
         for result in results:
-            if isinstance(result, tuple):
-                matrix[result[0]] = result[1]
+            matrix[result[0]] = result[1]
 
     return matrix
 

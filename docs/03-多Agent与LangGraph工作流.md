@@ -145,7 +145,7 @@ def approval_gate(state: PlanningState) -> dict:
 - 明确的输入字段和输出字段。
 - 对模型输出进行 Pydantic 校验（`ModelGateway.structured_completion`）。
 - 对 Tool 调用区分同步 `invoke` 与异步 `ainvoke`。
-- LLM 调用设置独立超时，失败后降级或抛出异常。
+- LLM 调用设置独立超时，失败即抛出异常，工作流终止。
 - 不在节点中硬编码业务数据。
 
 示例结构（真实代码节选）：
@@ -166,7 +166,7 @@ async def _llm_cost_estimation(settings, state):
 
 ## 8. 重试与幂等
 
-- 模型生成：可以重试，结构化输出失败时降级到确定性逻辑或抛出异常。
+- 模型生成：结构化输出失败即抛出异常，工作流终止（仅测试用 `MOCK_MODEL_MODE=true` 走确定性路径）。
 - 查询工具（search_attractions / search_poi_amap）：可安全重试。
 - 计算工具（route_matrix、product_cost）：相同输入产生相同结果。
 - 保存版本：使用 `plan_id + version` 自增，快照不可变。

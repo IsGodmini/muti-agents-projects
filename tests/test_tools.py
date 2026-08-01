@@ -142,15 +142,15 @@ async def test_search_attractions_raises_without_api_key(
 
 
 @pytest.mark.asyncio
-async def test_weather_forecast_returns_empty_without_key(monkeypatch) -> None:
+async def test_weather_forecast_raises_without_key(monkeypatch) -> None:
     monkeypatch.setattr(
         travel,
         "get_settings",
         lambda: SimpleNamespace(weather_api_key=""),
     )
 
-    result = await tool_registry.ainvoke("get_weather_forecast", {"city": "杭州", "days": 3})
-    assert result == []
+    with pytest.raises(MCPToolError, match="WEATHER_API_KEY"):
+        await tool_registry.ainvoke("get_weather_forecast", {"city": "杭州", "days": 3})
 
 
 @pytest.mark.asyncio
