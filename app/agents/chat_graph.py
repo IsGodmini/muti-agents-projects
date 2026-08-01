@@ -6,6 +6,7 @@ then produces a structured PlanRequest when enough info is gathered.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -74,6 +75,16 @@ async def chat_node(state: ChatState) -> dict:
     return result
 
 
+def _parse_date(value: str) -> str | None:
+    """Normalize a YYYY-MM-DD date string; return None if missing/invalid."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        return None
+
+
 def _conversation_to_request(conv: PlannerConversation) -> dict:
     try:
         product_type = ProductType(conv.product_type)
@@ -87,6 +98,7 @@ def _conversation_to_request(conv: PlannerConversation) -> dict:
 
     return {
         "title": conv.title or f"{conv.destination}之旅",
+        "departure_date": _parse_date(conv.departure_date),
         "product_type": product_type.value,
         "destination": conv.destination,
         "days": conv.days,

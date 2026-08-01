@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from langgraph.types import Command
 
+from app.agents.chat_graph import _parse_date
 from app.agents.graph import build_planning_graph
 from app.agents.prompts import PARSE_USER_INPUT_SYSTEM
 from app.config import get_settings
@@ -93,6 +94,7 @@ async def converse_until_ready() -> PlanRequest:
                 title=response.title or f"{response.destination}旅行",
                 product_type=response.product_type,
                 destination=response.destination,
+                departure_date=_parse_date(response.departure_date),
                 days=response.days,
                 nights=nights,
                 group_size=response.group_size,
@@ -130,6 +132,7 @@ async def converse_until_ready() -> PlanRequest:
                     title=final.title or f"{final.destination}旅行",
                     product_type=final.product_type,
                     destination=final.destination,
+                    departure_date=_parse_date(final.departure_date),
                     days=final.days,
                     nights=nights,
                     group_size=final.group_size,

@@ -1,6 +1,8 @@
 """Response renderer: generate user-readable Markdown travel report."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from app.models.schemas import (
     ConstraintReport,
     ItineraryDay,
@@ -32,6 +34,8 @@ def render_markdown_report(
     lines.append("| 项目 | 内容 |")
     lines.append("|---|---|")
     lines.append(f"| 目的地 | {request.destination} |")
+    if request.departure_date:
+        lines.append(f"| 出发日期 | {request.departure_date.isoformat()} |")
     lines.append(f"| 天数 | {request.days}天{request.nights}晚 |")
     lines.append(f"| 人数 | {request.group_size}人 |")
     lines.append(f"| 节奏 | {request.pace.value if hasattr(request.pace, 'value') else request.pace} |")
@@ -56,7 +60,10 @@ def render_markdown_report(
         lines.append("")
 
     for day in itinerary:
-        lines.append(f"## Day {day.day}: {day.theme}")
+        date_str = ""
+        if request.departure_date:
+            date_str = f"（{(request.departure_date + timedelta(days=day.day - 1)).isoformat()}）"
+        lines.append(f"## Day {day.day}{date_str}: {day.theme}")
         lines.append("")
         lines.append("| 时间 | 活动 | 类型 | 费用/人 |")
         lines.append("|---|---|---|---|")

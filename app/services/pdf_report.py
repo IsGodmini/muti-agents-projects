@@ -11,6 +11,7 @@ full-height image panels; each page supports multiple photos):
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -96,7 +97,11 @@ def build_pdf_report(
     for index, day in enumerate(itinerary):
         raw = day_image_paths[index] if index < len(day_image_paths) else None
         images = raw if isinstance(raw, list) else ([raw] if raw else [])
-        pages.append(build_day_page(day, images, (day.day - 1) % 3))
+        day_date = (
+            (request.departure_date + timedelta(days=day.day - 1)).strftime("%m月%d日")
+            if request.departure_date else ""
+        )
+        pages.append(build_day_page(day, images, (day.day - 1) % 3, day_date))
 
     pages.append(build_summary_page(request, quote))
 
@@ -170,13 +175,18 @@ def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
         y += 54
     y += 12
 
-    for label, value in (
+    info_items = [
         ("目的地", request.destination),
         ("周期", f"{request.days} 天 {request.nights} 晚"),
+    ]
+    if request.departure_date:
+        info_items.insert(1, ("出发日期", request.departure_date.strftime("%Y-%m-%d")))
+    info_items += [
         ("人数", f"{request.group_size} 人"),
         ("客群", request.target_audience),
         ("主题", " / ".join(request.themes) or "综合"),
-    ):
+    ]
+    for label, value in info_items:
         draw.text((x, y), label, font=head_font, fill=GOLD)
         y += 28
         draw.text((x, y), value, font=body_font, fill=INK)
@@ -192,7 +202,7 @@ def build_cover(request: PlanRequest, poster_path: str | None) -> Image.Image:
 # Day pages (three layouts, multi-image support)
 # ------------------------------------------------------------------
 
-def build_day_page(day: ItineraryDay, images: list[str], layout: int) -> Image.Image:
+def build_day_page(day: ItineraryDay, images: list[str], layout: int, day_date: str = "") -> Image.Image:
     """Brochure day page (landscape).
 
     layout:
@@ -202,7 +212,8 @@ def build_day_page(day: ItineraryDay, images: list[str], layout: int) -> Image.I
     """
     page = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), PAPER)
     draw = ImageDraw.Draw(page)
-    _draw_top_bar(draw, f"DAY {day.day}", day.theme)
+    subtitle = f"{day_date} ｜ {day.theme}" if day_date else day.theme
+    _draw_top_bar(draw, f"DAY {day.day}", subtitle)
 
     gap = 24
     content_w = PAGE_WIDTH - 2 * MARGIN

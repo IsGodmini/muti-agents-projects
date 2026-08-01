@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -35,6 +35,7 @@ class PlanRequest(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     product_type: ProductType
     destination: str = Field(min_length=2, max_length=80)
+    departure_date: date | None = Field(default=None, description="出发日期（YYYY-MM-DD）")
     days: int = Field(ge=1, le=15)
     nights: int = Field(ge=0, le=14)
     group_size: int = Field(ge=1, le=500)
@@ -295,6 +296,7 @@ class CostBreakdown(BaseModel):
 class PlannerConversation(BaseModel):
     ready: bool = Field(description="信息是否足够开始策划")
     question: str = Field(default="", description="不够时向用户提的下一个问题")
+    departure_date: str = Field(default="", description="出发日期，格式 YYYY-MM-DD，未知留空")
     title: str = Field(default="", description="产品名称")
     product_type: str = Field(default="family_trip", description="family_trip/study_tour/corporate_team_building/senior_friendly")
     destination: str = Field(default="")

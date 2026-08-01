@@ -15,7 +15,7 @@ TripOps AI 的数据层不仅保存最终行程，还要回答：
 
 | 模型 | 作用 |
 | --- | --- |
-| `PlanRequest` | 策划任务输入（目的地、天数、人数、预算、主题、节奏、约束） |
+| `PlanRequest` | 策划任务输入（目的地、出发日期、天数、人数、预算、主题、节奏、约束） |
 | `ProductType` / `TravelPace` / `PlanStatus` | 产品类型、旅行节奏、方案状态枚举 |
 | `ResourceCandidate` | 候选资源，含来源 URL、检索时间、证据、坐标、评分 |
 | `ItineraryDay` / `ItineraryEvent` | 分日行程与单个活动 |

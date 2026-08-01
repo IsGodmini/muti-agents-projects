@@ -108,6 +108,7 @@ curl -X POST http://localhost:8000/api/v1/plans/run \
     "title": "北京研学之旅",
     "product_type": "study_tour",
     "destination": "北京",
+    "departure_date": "2026-08-01",
     "days": 4,
     "nights": 3,
     "group_size": 10,

@@ -112,6 +112,7 @@
             <option value="senior_friendly">银龄慢游</option>
           </select></div>
         <div class="field"><label>目的地</label><input id="f-dest" placeholder="如：北京"></div>
+        <div class="field"><label>出发日期</label><input id="f-date" type="date"></div>
         <div class="field"><label>客群</label><input id="f-aud" placeholder="如：8-12岁儿童及家长"></div>
         <div class="field"><label>天数</label><input id="f-days" type="number" value="4" min="1" max="15"></div>
         <div class="field"><label>晚数</label><input id="f-nights" type="number" value="3" min="0" max="14"></div>
@@ -224,6 +225,7 @@ function fillForm(p) {
   if (p.title) $('f-title').value = p.title;
   if (p.product_type) $('f-type').value = p.product_type;
   if (p.destination) $('f-dest').value = p.destination;
+  if (p.departure_date) $('f-date').value = p.departure_date;
   if (p.target_audience) $('f-aud').value = p.target_audience;
   if (p.days) $('f-days').value = p.days;
   if (p.nights !== undefined) $('f-nights').value = p.nights;
@@ -245,6 +247,7 @@ function collectPlan() {
     title: $('f-title').value.trim() || ($('f-dest').value.trim() || '旅行') + '之旅',
     product_type: $('f-type').value,
     destination: $('f-dest').value.trim(),
+    departure_date: $('f-date').value || null,
     days, nights: parseInt($('f-nights').value) || days - 1,
     group_size: parseInt($('f-people').value) || 2,
     budget_per_person: parseInt($('f-budget').value) || 2000,

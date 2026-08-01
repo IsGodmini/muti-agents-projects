@@ -91,6 +91,9 @@ PARSE_USER_INPUT_SYSTEM = """\
 - 人数和人群（谁去）
 - 预算范围
 
+出发日期：如果用户提到出行时间（如"8月初""下周末""8月1日"），提取为
+departure_date（YYYY-MM-DD）；不确定具体日期可留空。
+
 可以推断、不必追问的信息（填入 assumptions）：
 - product_type：根据人群和目的推断
 - title：你来起一个好听的名字
