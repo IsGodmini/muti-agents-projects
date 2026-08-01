@@ -343,6 +343,11 @@ async def _generate_schedule(settings, request, optimized, resource_map, weather
             for e in day_info.events
         ]
         days.append(ItineraryDay(day=day_info.day, theme=day_info.theme, events=events))
+
+    # LLM 可能只输出部分天（如资源不足时）；补齐缺失天为自由活动/休整，
+    # 保证最终行程恰好覆盖 request.days，PDF 每天一页。
+    by_day = {d.day: d for d in days}
+    days = [by_day.get(day_number, _free_day(day_number)) for day_number in range(1, request.days + 1)]
     logger.info("LLM generated schedule for %d days", len(days))
     return days
 
@@ -350,6 +355,9 @@ async def _generate_schedule(settings, request, optimized, resource_map, weather
 def _basic_schedule(request, optimized, resource_map) -> list[ItineraryDay]:
     days: list[ItineraryDay] = []
     for day_index, day_resources in enumerate(optimized, start=1):
+        if not day_resources:
+            days.append(_free_day(day_index))
+            continue
         events: list[ItineraryEvent] = []
         start_hour = 9
         for rid in day_resources:
@@ -365,6 +373,24 @@ def _basic_schedule(request, optimized, resource_map) -> list[ItineraryDay]:
             start_hour = end_minutes // 60 + 2
         days.append(ItineraryDay(day=day_index, theme=f"{request.destination}探索 · 第 {day_index} 天", events=events))
     return days
+
+
+def _free_day(day_number: int) -> ItineraryDay:
+    """占位天：资源不足时的自由活动/休整安排，避免空天导致校验失败。"""
+    return ItineraryDay(
+        day=day_number,
+        theme="自由活动 · 休整",
+        events=[
+            ItineraryEvent(
+                start_time="09:00", end_time="11:00", title="自由活动",
+                category="break", description="预留自由活动时间，可按兴趣自行安排。", cost_per_person=0,
+            ),
+            ItineraryEvent(
+                start_time="14:00", end_time="17:00", title="休整 / 自由安排",
+                category="break", description="预留休整、购物或返程时间。", cost_per_person=0,
+            ),
+        ],
+    )
 
 
 # ------------------------------------------------------------------

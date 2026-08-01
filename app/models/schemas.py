@@ -242,7 +242,7 @@ class TravelTimePair(BaseModel):
 
 
 class TravelTimeMatrix(BaseModel):
-    pairs: list[TravelTimePair]
+    pairs: list[TravelTimePair] = Field(default_factory=list)
 
 
 class ScheduledEvent(BaseModel):

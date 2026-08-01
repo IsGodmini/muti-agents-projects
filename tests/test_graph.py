@@ -53,6 +53,8 @@ async def _mock_structured_completion(self, *, schema, **kwargs):
             TravelTimePair(from_index=2, to_index=1, time=20),
         ])
     if schema is ScheduleBatch:
+        # 只返回 Day 1：模拟 LLM 漏掉后续天（如资源不足），
+        # 工作流必须补齐到 request.days，保证每天一页。
         return ScheduleBatch(days=[
             DailySchedule(day=1, theme="自然探索", events=[
                 ScheduledEvent(
@@ -66,14 +68,6 @@ async def _mock_structured_completion(self, *, schema, **kwargs):
                     start_time="13:00", end_time="16:00",
                     category="outdoor", description="湿地自然观察。",
                     cost_per_person=80,
-                ),
-            ]),
-            DailySchedule(day=2, theme="手作体验", events=[
-                ScheduledEvent(
-                    resource_id="res-3", title="测试工坊",
-                    start_time="09:30", end_time="11:00",
-                    category="workshop", description="手作体验课程。",
-                    cost_per_person=60,
                 ),
             ]),
         ])
@@ -169,6 +163,8 @@ async def test_graph_runs_end_to_end_with_auto_review(monkeypatch) -> None:
         assert result["current_stage"] == "delivered"
         assert result["constraint_report"].valid is True
         assert result["weather_forecast"][0]["text_day"] == "晴"
+        assert len(result["itinerary"]) == 2
+        assert "自由活动" in result["itinerary"][1].theme
         assert result["quote"].total_cost == 26000
         assert result["verification_score"] >= 60
         assert result["poster_asset"]["status"] == "generated"
@@ -248,6 +244,7 @@ async def test_graph_rejection_records_decision_and_ends(monkeypatch) -> None:
 
         assert result["current_stage"] == "rejected"
         assert result["approval"]["approved"] is False
+        assert len(result["itinerary"]) == 2
         assert any(
             rec["plan_id"] == "PLAN-REJECT-001" and rec["decision"]["approved"] is False
             for rec in recorded
