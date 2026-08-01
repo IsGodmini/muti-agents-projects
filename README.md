@@ -34,7 +34,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 | 路线优化 | Google OR-Tools |
 | 文生图 | ComfyUI（`MOCK_IMAGEGEN=true` 时使用预处理素材） |
 | 交付物 | 横版小册子 PDF（图文分区、按天多图排版、总结页）+ Markdown 报告（含估算标注） |
-| API | FastAPI（可选，含 SSE 流式进度） |
+| API | FastAPI（可选，含 Web 前端页面、SSE 流式进度） |
 | 持久化 | JSON 文件（方案版本 + 审批记录 + 报告/PDF/海报） |
 | 防护与评估 | Prompt Injection Guard、资源评分排序、确定性校验、质量评估框架 |
 
@@ -43,6 +43,7 @@ cp .env.example .env   # 填写 LLM_API_KEY、TAVILY_API_KEY（可选 AMAP_API_K
 ```
 ├── cli.py                  # 对话式 CLI 入口
 ├── app/
+│   ├── static/index.html  # Web 前端（对话/策划/审批/查看报告）
 │   ├── agents/
 │   │   ├── graph.py        # 策划工作流（13 节点）
 │   │   ├── chat_graph.py   # 对话式需求收集图

@@ -31,6 +31,8 @@ TripOps AI 的主入口是对话式 CLI，同时提供 FastAPI REST 接口用于
 - API 前缀：`/api/v1`
 - 数据格式：`application/json`
 - 交互式文档：`http://localhost:8000/docs`
+- Web 前端：`http://localhost:8000/`（对话策划、直接策划、SSE 进度、审批、查看报告）
+- 交付物文件：`http://localhost:8000/files/plans/{plan_id}/report.pdf|report.md`
 
 ## 4. 接口总览
 

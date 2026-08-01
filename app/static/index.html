@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TripOps AI · 旅行策划</title>
+<style>
+  :root {
+    --navy: #183a5e; --navy2: #38668f; --gold: #d4af37;
+    --bg: #f4f6f8; --card: #ffffff; --ink: #2d343a; --gray: #7a828a;
+    --line: #dee2e8; --ok: #27ae60; --warn: #e67e22; --err: #e74c3c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: linear-gradient(135deg, var(--navy), var(--navy2)); color: #fff; padding: 20px 28px; }
+  header h1 { font-size: 22px; letter-spacing: 1px; }
+  header .sub { font-size: 13px; opacity: .85; margin-top: 4px; }
+  header .status { display: flex; gap: 14px; margin-top: 10px; font-size: 12px; flex-wrap: wrap; }
+  header .status span { background: rgba(255,255,255,.12); padding: 3px 10px; border-radius: 12px; }
+  header .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .ok { background: var(--ok); } .off { background: #888; }
+  main { max-width: 1080px; margin: 22px auto 60px; padding: 0 18px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { padding: 8px 18px; border-radius: 20px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-size: 14px; }
+  .tab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+  .card h3 { font-size: 15px; color: var(--navy); margin-bottom: 12px; border-left: 4px solid var(--gold); padding-left: 10px; }
+
+  /* chat */
+  #chat-box { height: 380px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fbfcfe; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: var(--navy); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.system { align-self: center; background: #fdf6e3; color: #7a6c2a; font-size: 13px; border: 1px solid #eee3c0; }
+  .input-row { display: flex; gap: 10px; margin-top: 12px; }
+  .input-row input { flex: 1; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  button { padding: 11px 22px; border: none; border-radius: 10px; background: var(--navy); color: #fff; font-size: 14px; cursor: pointer; }
+  button:hover { background: var(--navy2); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button.gold { background: var(--gold); color: #fff; }
+  button.green { background: var(--ok); }
+  button.red { background: var(--err); }
+
+  /* form */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+  .field label { display: block; font-size: 13px; color: var(--gray); margin-bottom: 5px; }
+  .field input, .field select, .field textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
+  .field.full { grid-column: 1 / -1; }
+  .hint { font-size: 12px; color: var(--gray); margin-top: 6px; }
+
+  /* progress / result */
+  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .step { font-size: 12px; padding: 4px 12px; border-radius: 14px; background: #eef1f5; color: var(--gray); }
+  .step.done { background: #e4f5ec; color: var(--ok); }
+  .step.active { background: #fff3d6; color: var(--warn); }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin: 2px; }
+  .badge.info { background: #e8f0fb; color: var(--navy2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--gray); font-weight: 600; }
+  .row-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .link { color: var(--navy2); text-decoration: none; font-size: 13px; }
+  .link:hover { text-decoration: underline; }
+  textarea#comment { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 13px; margin-top: 8px; }
+  .hidden { display: none; }
+  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧳 TripOps AI · 旅行策划助手</h1>
+  <div class="sub">和 Agent 聊几句，自动完成资源搜索、路线优化、行程编排、成本核算与交付物生成</div>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button class="tab active" data-tab="chat">💬 对话策划</button>
+    <button class="tab" data-tab="direct">📝 直接策划</button>
+    <button class="tab" data-tab="result">📦 方案与审批</button>
+  </div>
+
+  <!-- 对话 -->
+  <section class="panel active" id="panel-chat">
+    <div class="card">
+      <h3>与旅行顾问对话</h3>
+      <div id="chat-box">
+        <div class="msg agent">你好！说说你的旅行想法吧，比如「暑假想带孩子去北京玩几天」。</div>
+      </div>
+      <div class="input-row">
+        <input id="chat-input" placeholder="输入你的想法…" onkeydown="if(event.key==='Enter')sendChat()">
+        <button id="chat-send" onclick="sendChat()">发送</button>
+      </div>
+      <div class="hint">信息足够后会自动生成方案需求；也可点右上「直接策划」手动填写。</div>
+    </div>
+  </section>
+
+  <!-- 直接策划 -->
+  <section class="panel" id="panel-direct">
+    <div class="card">
+      <h3>填写旅行需求</h3>
+      <div class="grid">
+        <div class="field"><label>产品标题</label><input id="f-title" placeholder="如：北京四日亲子研学之旅"></div>
+        <div class="field"><label>产品类型</label>
+          <select id="f-type">
+            <option value="family_trip">家庭出游</option>
+            <option value="study_tour" selected>研学旅行</option>
+            <option value="corporate_team_building">企业团建</option>
+            <option value="senior_friendly">银龄慢游</option>
+          </select></div>
+        <div class="field"><label>目的地</label><input id="f-dest" placeholder="如：北京"></div>
+        <div class="field"><label>客群</label><input id="f-aud" placeholder="如：8-12岁儿童及家长"></div>
+        <div class="field"><label>天数</label><input id="f-days" type="number" value="4" min="1" max="15"></div>
+        <div class="field"><label>晚数</label><input id="f-nights" type="number" value="3" min="0" max="14"></div>
+        <div class="field"><label>人数</label><input id="f-people" type="number" value="3" min="1" max="500"></div>
+        <div class="field"><label>人均预算（元）</label><input id="f-budget" type="number" value="3000" min="100"></div>
+        <div class="field"><label>节奏</label>
+          <select id="f-pace"><option value="intense">紧凑</option><option value="moderate" selected>适中</option><option value="relaxed">轻松</option></select></div>
+        <div class="field"><label>主题（逗号分隔）</label><input id="f-themes" placeholder="历史文化, 博物馆"></div>
+        <div class="field"><label>必去地点（逗号分隔）</label><input id="f-must" placeholder="故宫"></div>
+        <div class="field"><label>避雷（逗号分隔）</label><input id="f-avoid" placeholder="购物店"></div>
+        <div class="field full"><label>硬约束（每行一条）</label><textarea id="f-constraints" rows="2" placeholder="连续乘车不超过60分钟"></textarea></div>
+      </div>
+      <div class="row-actions"><button onclick="runPlan()">🚀 开始策划</button><span class="hint" id="direct-hint"></span></div>
+    </div>
+  </section>
+
+  <!-- 结果 -->
+  <section class="panel" id="panel-result">
+    <div class="card">
+      <h3>执行进度</h3>
+      <div class="steps" id="steps"></div>
+      <div id="run-status" class="hint">尚未运行。</div>
+    </div>
+    <div class="card hidden" id="approval-card">
+      <h3>人工审批</h3>
+      <div class="hint" id="approval-msg">方案已生成，等待确认。</div>
+      <textarea id="comment" rows="2" placeholder="审批意见（可选）"></textarea>
+      <div class="row-actions">
+        <button class="green" onclick="approve(true)">✅ 批准交付</button>
+        <button class="red" onclick="approve(false)">❌ 驳回</button>
+      </div>
+    </div>
+    <div class="card hidden" id="result-card">
+      <h3>方案结果</h3>
+      <div id="result-body"></div>
+      <div class="row-actions" id="report-links"></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let chatThreadId = null;
+let currentThreadId = null;
+let currentPlanId = null;
+
+// tabs
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $('panel-' + t.dataset.tab).classList.add('active');
+}));
+
+// health
+async function loadHealth() {
+  try {
+    const r = await fetch('/api/v1/health');
+    const h = await r.json();
+    const items = [
+      ['服务', 'ok'],
+      ['模型', h.mock_model_mode ? 'Mock' : 'Ark'],
+      ['Tavily', h.tavily_mcp_configured ? '已配置' : '未配置', h.tavily_mcp_configured],
+      ['天气', h.weather_configured ? '已配置' : '未配置', h.weather_configured],
+    ];
+    $('status').innerHTML = items.map(([k, v, on]) =>
+      `<span><span class="dot ${on === false ? 'off' : 'ok'}"></span>${k}：${v}</span>`).join('');
+  } catch (e) { $('status').innerHTML = '<span>无法连接后端</span>'; }
+}
+loadHealth();
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); }
+function addMsg(role, text) {
+  const box = $('chat-box');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------- chat ----------
+async function sendChat() {
+  const input = $('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addMsg('user', text);
+  $('chat-send').disabled = true;
+  try {
+    const r = await fetch('/api/v1/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_id: chatThreadId, message: text }) });
+    const d = await r.json();
+    chatThreadId = d.thread_id;
+    if (d.ready) {
+      addMsg('agent', '好的，信息足够了，我来为你生成方案！');
+      addMsg('system', '需求已结构化，可在「直接策划」中微调后提交，或直接点击下方按钮执行。');
+      fillForm(d.plan_request);
+      toast('需求已就绪，请到「直接策划」提交');
+    } else {
+      addMsg('agent', d.reply || '请告诉我更多细节。');
+    }
+  } catch (e) { addMsg('system', '请求失败：' + e.message); }
+  $('chat-send').disabled = false;
+}
+
+function fillForm(p) {
+  if (!p) return;
+  if (p.title) $('f-title').value = p.title;
+  if (p.product_type) $('f-type').value = p.product_type;
+  if (p.destination) $('f-dest').value = p.destination;
+  if (p.target_audience) $('f-aud').value = p.target_audience;
+  if (p.days) $('f-days').value = p.days;
+  if (p.nights !== undefined) $('f-nights').value = p.nights;
+  if (p.group_size) $('f-people').value = p.group_size;
+  if (p.budget_per_person) $('f-budget').value = p.budget_per_person;
+  if (p.pace) $('f-pace').value = p.pace;
+  if (p.themes && p.themes.length) $('f-themes').value = p.themes.join(', ');
+  if (p.must_visit && p.must_visit.length) $('f-must').value = p.must_visit.join(', ');
+  if (p.avoid && p.avoid.length) $('f-avoid').value = p.avoid.join(', ');
+  if (p.hard_constraints && p.hard_constraints.length) $('f-constraints').value = p.hard_constraints.join('\n');
+}
+
+// ---------- direct plan ----------
+function collectPlan() {
+  const split = s => s.split(/[,，]/).map(x => x.trim()).filter(Boolean);
+  const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+  const days = parseInt($('f-days').value) || 3;
+  return {
+    title: $('f-title').value.trim() || ($('f-dest').value.trim() || '旅行') + '之旅',
+    product_type: $('f-type').value,
+    destination: $('f-dest').value.trim(),
+    days, nights: parseInt($('f-nights').value) || days - 1,
+    group_size: parseInt($('f-people').value) || 2,
+    budget_per_person: parseInt($('f-budget').value) || 2000,
+    target_audience: $('f-aud').value.trim() || '普通游客',
+    themes: split($('f-themes').value),
+    pace: $('f-pace').value,
+    must_visit: split($('f-must').value),
+    avoid: split($('f-avoid').value),
+    hard_constraints: lines($('f-constraints').value),
+  };
+}
+
+async function runPlan() {
+  const plan = collectPlan();
+  if (!plan.destination) { toast('请填写目的地'); return; }
+  currentThreadId = null; currentPlanId = null;
+  $('steps').innerHTML = '';
+  $('run-status').textContent = '正在执行工作流…';
+  $('approval-card').classList.add('hidden');
+  $('result-card').classList.add('hidden');
+  $('direct-hint').textContent = '执行中（真实调用 LLM / 搜索，可能需要 1-3 分钟）…';
+  document.querySelector('[data-tab="result"]').click();
+
+  try {
+    const res = await fetch('/api/v1/plans/run/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
+    if (!res.ok || !res.body) { const t = await res.text(); throw new Error(t.slice(0, 200)); }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const lines = block.split('\n');
+        const ev = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();
+        const dataLine = (lines.find(l => l.startsWith('data:')) || '').slice(5).trim();
+        if (!dataLine) continue;
+        let obj; try { obj = JSON.parse(dataLine); } catch { continue; }
+        handleSSE(ev, obj);
+      }
+    }
+  } catch (e) {
+    $('run-status').textContent = '执行失败：' + e.message;
+  }
+  $('direct-hint').textContent = '';
+}
+
+function handleSSE(ev, obj) {
+  if (ev === 'started') {
+    currentThreadId = obj.thread_id; currentPlanId = obj.plan_id;
+    $('steps').innerHTML = '';
+  } else if (ev === 'node_start') {
+    addStep(obj.node, true);
+    $('run-status').textContent = '执行中：' + obj.node;
+  } else if (ev === 'node_end') {
+    markStepDone(obj.node);
+  } else if (ev === 'completed') {
+    $('run-status').textContent = '已完成，等待审批（当前阶段：' + (obj.current_stage || 'unknown') + '）';
+    $('approval-card').classList.remove('hidden');
+    $('approval-msg').textContent = `方案 ${currentPlanId} 已生成，等待人工审批。`;
+  } else if (ev === 'error') {
+    $('run-status').textContent = '错误：' + (obj.message || 'unknown');
+  }
+}
+
+function addStep(name, active) {
+  const div = document.createElement('span');
+  div.className = 'step' + (active ? ' active' : '');
+  div.dataset.name = name;
+  div.textContent = name;
+  $('steps').appendChild(div);
+}
+function markStepDone(name) {
+  document.querySelectorAll('.step').forEach(s => {
+    if (s.dataset.name === name) { s.classList.remove('active'); s.classList.add('done'); }
+  });
+}
+
+// ---------- approval ----------
+async function approve(approved) {
+  if (!currentThreadId) { toast('没有可审批的方案'); return; }
+  const body = { approved, reviewer_id: 'web-user', comment: $('comment').value.trim() || null };
+  try {
+    const r = await fetch(`/api/v1/plans/${currentThreadId}/approval`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    $('approval-card').classList.add('hidden');
+    $('result-card').classList.remove('hidden');
+    renderResult(d);
+    toast(approved ? '已批准，正在生成交付物' : '已驳回');
+  } catch (e) { toast('审批失败：' + e.message); }
+}
+
+function renderResult(d) {
+  const stage = d.current_stage || 'unknown';
+  let html = `<p><span class="badge info">状态：${stage}</span> <span class="badge info">方案：${currentPlanId || '-'}</span></p>`;
+  const data = d.data || {};
+  const itinerary = data.itinerary || [];
+  if (itinerary.length) {
+    html += '<h3 style="margin-top:12px">分日行程</h3><table><tr><th>天</th><th>主题</th><th>活动</th></tr>';
+    for (const day of itinerary) {
+      const acts = (day.events || []).map(e => `${e.start_time}-${e.end_time} ${e.title}`).join('；');
+      html += `<tr><td>Day ${day.day}</td><td>${day.theme}</td><td>${acts}</td></tr>`;
+    }
+    html += '</table>';
+  }
+  const quote = data.quote;
+  if (quote) {
+    html += `<p style="margin-top:10px"><span class="badge info">总成本 ¥${quote.total_cost.toLocaleString()}</span> ` +
+      `<span class="badge info">人均售价 ¥${quote.sale_price_per_person.toLocaleString()}</span> ` +
+      `<span class="badge info">毛利率 ${(quote.margin_rate * 100).toFixed(1)}%</span></p>`;
+  }
+  $('result-body').innerHTML = html;
+
+  const links = [];
+  if (currentPlanId) {
+    links.push(`<a class="link" target="_blank" href="/files/plans/${currentPlanId}/report.pdf">📄 查看 PDF 报告</a>`);
+    links.push(`<a class="link" target="_blank" href="/files/plans/${currentPlanId}/report.md">📝 查看 Markdown 报告</a>`);
+  }
+  $('report-links').innerHTML = links.join('　');
+}
+</script>
+</body>
+</html>
