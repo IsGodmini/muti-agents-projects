@@ -1,4 +1,4 @@
-"""WeatherClient 单元测试（GeoAPI 城市解析 + v7 每日预报）。"""
+"""WeatherClient 单元测试（GeoAPI 城市解析 + v1 每日预报）。"""
 from __future__ import annotations
 
 import httpx
@@ -9,14 +9,23 @@ from app.services.weather import WeatherClient
 GEO_OK = {
     "code": "200",
     "location": [
-        {"name": "杭州", "id": "101210101", "adm1": "浙江省", "country": "中国"},
+        {"name": "杭州", "id": "101210101", "lat": "30.2741", "lon": "120.1552",
+         "adm1": "浙江省", "country": "中国"},
     ],
 }
 WEATHER_OK = {
-    "code": "200",
-    "daily": [
-        {"fxDate": "2026-08-01", "textDay": "晴", "tempMax": "32", "tempMin": "25",
-         "windScaleDay": "3-4", "humidity": "60"},
+    "metadata": {"tag": "t"},
+    "days": [
+        {
+            "forecastStartTime": "2026-08-01T00:00+08:00",
+            "temperatureMax": {"value": 32.4, "unit": "°C"},
+            "temperatureMin": {"value": 24.8, "unit": "°C"},
+            "daytime": {
+                "condition": {"text": "晴", "code": "100"},
+                "wind": {"scale": 2},
+                "humidity": 0.6,
+            },
+        },
     ],
 }
 
@@ -42,30 +51,33 @@ async def test_city_name_resolved_via_geoapi() -> None:
     assert len(seen) == 2
     assert "/geo/v2/city/lookup" in seen[0]
     assert "range=cn" in seen[0]
-    assert "/v7/weather/3d" in seen[1]
-    assert "location=101210101" in seen[1]
+    # v1 每日预报使用经纬度路径参数
+    assert "/weather/v1/daily/30.2741/120.1552" in seen[1]
+    assert "days=3" in seen[1]
+    assert "localTime=true" in seen[1]
+    assert "lang=zh" in seen[1]
     assert result[0]["date"] == "2026-08-01"
     assert result[0]["text_day"] == "晴"
+    assert result[0]["temp_max"] == 32
+    assert result[0]["temp_min"] == 25
+    assert result[0]["wind_scale_day"] == "2"
+    assert result[0]["humidity"] == 60
 
 
 @pytest.mark.asyncio
-async def test_days_mapped_to_supported_lengths() -> None:
-    paths: list[str] = []
+async def test_days_passed_through_1_to_10() -> None:
+    query_days: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        paths.append(request.url.path)
+        query_days.append(request.url.params.get("days", ""))
         return httpx.Response(200, json=WEATHER_OK)
 
     client = _make(handler)
-    await client.get_forecast("116.41,39.92", days=5)   # 5 天行程 → 7d
-    await client.get_forecast("116.41,39.92", days=1)   # 1 天行程 → 3d
-    await client.get_forecast("116.41,39.92", days=7)   # 7 天行程 → 7d
+    await client.get_forecast("116.41,39.92", days=5)
+    await client.get_forecast("116.41,39.92", days=1)
+    await client.get_forecast("116.41,39.92", days=10)
 
-    assert paths == [
-        "/v7/weather/7d",
-        "/v7/weather/3d",
-        "/v7/weather/7d",
-    ]
+    assert query_days == ["5", "1", "10"]
 
 
 @pytest.mark.asyncio
@@ -78,7 +90,7 @@ async def test_coordinate_skips_geoapi() -> None:
 
     client = _make(handler)
     await client.get_forecast("120.1552,30.2741", days=3)
-    assert paths == ["/v7/weather/3d"]
+    assert paths == ["/weather/v1/daily/30.2741/120.1552"]
 
 
 @pytest.mark.asyncio
@@ -92,12 +104,12 @@ async def test_no_location_found_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_weather_error_code_raises() -> None:
+async def test_weather_error_raises() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if "/geo/v2/city/lookup" in request.url.path:
             return httpx.Response(200, json=GEO_OK)
-        return httpx.Response(200, json={"code": "403", "refer": {"sources": []}})
+        return httpx.Response(200, json={"error": {"status": 403, "title": "Invalid Host"}})
 
     client = _make(handler)
-    with pytest.raises(RuntimeError, match="code=403"):
+    with pytest.raises(RuntimeError, match="Invalid Host"):
         await client.get_forecast("杭州", days=3)
