@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
 from typing import TypeVar
@@ -12,6 +14,58 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+
+
+async def fetch_images_as_data_urls(
+    urls: list[str],
+    *,
+    max_images: int = 8,
+    per_image_timeout: float = 8.0,
+    max_bytes: int = 3_000_000,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[str]:
+    """Download http(s) images and convert to base64 data URLs.
+
+    Ark 多模态模型会自行抓取 URL，图片链接失效/防盗链时容易返回 400
+    （InvalidParameter: Timeout while downloading url）。改为本地下载后
+    以 data URL 发送，由调用方控制下载与大小。
+
+    单个图片下载失败/超时/过大时跳过该图并记录日志；全部失败时返回空列表，
+    调用方可根据需要降级为纯文本请求（LLM API 本身仍会正常调用）。
+    """
+    targets = [u for u in urls if str(u).startswith(("http://", "https://"))][:max_images]
+    if not targets:
+        return []
+
+    async def fetch_one(url: str) -> str | None:
+        try:
+            async with httpx.AsyncClient(
+                timeout=per_image_timeout,
+                follow_redirects=True,
+                transport=transport,
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+            content = response.content
+            if not content or len(content) > max_bytes:
+                logger.warning(
+                    "Skip image %s: empty or too large (%d bytes)", url, len(content)
+                )
+                return None
+            content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+            if not content_type.startswith("image/"):
+                content_type = "image/jpeg"
+            encoded = base64.b64encode(content).decode("ascii")
+            return f"data:{content_type};base64,{encoded}"
+        except Exception as exc:  # noqa: BLE001 - 单个图片失败不阻断整体
+            logger.warning("Skip image %s: %s: %s", url, type(exc).__name__, str(exc)[:120])
+            return None
+
+    results = await asyncio.gather(*(fetch_one(u) for u in targets))
+    data_urls = [r for r in results if r]
+    if len(data_urls) < len(targets):
+        logger.warning("图片下载成功 %d/%d", len(data_urls), len(targets))
+    return data_urls
 
 
 def _schema_hint(schema: type[BaseModel]) -> str:

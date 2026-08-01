@@ -50,7 +50,7 @@ from app.models.schemas import (
     TravelTimeMatrix,
 )
 from app.services.guard import filter_resources as guard_filter_resources
-from app.services.model_gateway import ModelGateway
+from app.services.model_gateway import ModelGateway, fetch_images_as_data_urls
 from app.services.pdf_report import build_pdf_report
 from app.services.plan_store import plan_store
 from app.services.poster import PosterService
@@ -126,6 +126,8 @@ async def _enrich_resources(settings, resources):
     all_images = []
     for r in resources:
         all_images.extend(r.images[:3])
+    # 图片在本地下载后转 base64 data URL，避免 Ark 服务端抓取 URL 超时（400）
+    image_data_urls = await fetch_images_as_data_urls(all_images) if all_images else []
 
     batch = await gateway.structured_completion(
         model=settings.llm_model_multimodal,
@@ -133,11 +135,11 @@ async def _enrich_resources(settings, resources):
         user_prompt=(
             f"目的地资源列表：\n{descriptions}\n\n"
             + ("以下是搜索结果附带的现场图片，请结合图片内容判断景点实况、环境质量和适合人群。"
-               if all_images else "")
+               if image_data_urls else "")
         ),
         schema=ResourceEnrichmentBatch,
         timeout_seconds=45,
-        image_urls=all_images or None,
+        image_urls=image_data_urls or None,
     )
     enrichment_map = {
         (item.index if item.index >= 0 else pos): item
