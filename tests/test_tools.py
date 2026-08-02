@@ -1,11 +1,13 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from app.services.mcp_client import MCPToolError
 from app.services.tavily_mcp import TavilySearchItem, parse_tavily_search_text
+from app.services.tools.amap import AmapAPIError, AmapClient
 from app.tools import travel
 from app.tools import travel as _travel_tools  # noqa: F401
 from app.tools.registry import ToolRisk, tool_registry
@@ -42,6 +44,35 @@ def test_quote_tool_computes_from_provided_items() -> None:
     assert result.cost_per_person > 0
     assert result.sale_price_per_person <= 1800
     assert result.margin_rate > 0
+
+
+def test_quote_tool_rejects_zero_cost_items() -> None:
+    with pytest.raises(ValidationError):
+        tool_registry.invoke(
+            "calculate_product_cost",
+            {
+                "group_size": 5,
+                "target_margin_rate": 0.15,
+                "budget_per_person": 4000,
+                "cost_items": [{"category": "交通", "description": "车辆", "amount": 0}],
+            },
+        )
+
+
+@pytest.mark.parametrize("resource_ids", [[], ["only-resource"]])
+def test_optimizer_preserves_requested_days_with_few_resources(
+    resource_ids: list[str],
+) -> None:
+    result = travel.optimize_itinerary(
+        travel.OptimizeRouteInput(
+            resource_ids=resource_ids,
+            distance_matrix={},
+            days=4,
+        )
+    )
+
+    assert len(result) == 4
+    assert [resource for day in result for resource in day] == resource_ids
 
 
 @pytest.mark.asyncio
@@ -167,7 +198,11 @@ async def test_weather_forecast_calls_weather_client(monkeypatch) -> None:
     monkeypatch.setattr(
         travel,
         "get_settings",
-        lambda: SimpleNamespace(weather_api_key="test-key", weather_base_url="https://devapi.qweather.com/v7"),
+        lambda: SimpleNamespace(
+            weather_api_key="test-key",
+            weather_base_url="https://xxx.re.qweatherapi.com/v7",
+            weather_geo_base_url="",
+        ),
     )
     from app.services import weather as weather_module
 
@@ -177,9 +212,94 @@ async def test_weather_forecast_calls_weather_client(monkeypatch) -> None:
     assert result[0]["text_day"] == "晴"
 
 
+@pytest.mark.asyncio
+async def test_weather_forecast_falls_back_to_amap(monkeypatch) -> None:
+    class FailingWeatherClient:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+        async def get_forecast(self, location: str, days: int) -> list[dict]:
+            raise httpx.HTTPStatusError(
+                "forbidden",
+                request=httpx.Request("GET", "https://weather.example"),
+                response=httpx.Response(
+                    403, request=httpx.Request("GET", "https://weather.example")
+                ),
+            )
+
+    class FakeAmapClient:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+        async def weather_forecast(self, city: str, days: int) -> list[dict]:
+            assert city == "杭州"
+            assert days == 3
+            return [{"date": "2026-08-01", "text_day": "小雨", "provider": "amap"}]
+
+    monkeypatch.setattr(
+        travel,
+        "get_settings",
+        lambda: SimpleNamespace(
+            weather_api_key="invalid",
+            weather_base_url="https://weather.example",
+            weather_geo_base_url="",
+            amap_api_key="amap-key",
+            amap_base_url="https://restapi.amap.com/v3",
+        ),
+    )
+    from app.services import weather as weather_module
+
+    monkeypatch.setattr(weather_module, "WeatherClient", FailingWeatherClient)
+    monkeypatch.setattr(travel, "AmapClient", FakeAmapClient)
+
+    result = await tool_registry.ainvoke("get_weather_forecast", {"city": "杭州", "days": 3})
+    assert result[0]["provider"] == "amap"
+
+
 def test_async_tool_requires_ainvoke() -> None:
     with pytest.raises(RuntimeError, match="asynchronous"):
         tool_registry.invoke(
             "search_attractions",
             {"destination": "杭州", "themes": [], "audience": "", "limit": 5},
         )
+
+
+@pytest.mark.asyncio
+async def test_amap_application_error_is_not_returned_as_default_time() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "0", "info": "CUQPS_HAS_EXCEEDED_THE_LIMIT", "infocode": "10021"},
+        )
+
+    client = AmapClient("test-key", transport=httpx.MockTransport(handler))
+    with pytest.raises(AmapAPIError, match="10021"):
+        await client.travel_time("120.1,30.1", "120.2,30.2")
+
+
+@pytest.mark.asyncio
+async def test_amap_poi_keeps_an_official_traceable_source_url() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "1",
+                "infocode": "10000",
+                "pois": [{
+                    "id": "B023B13L9M",
+                    "name": "杭州西湖风景名胜区",
+                    "location": "120.148,30.242",
+                    "type": "风景名胜",
+                    "address": "西湖区",
+                    "biz_ext": {"rating": "4.9", "cost": "0", "open_time": "00:00-24:00"},
+                }],
+            },
+        )
+
+    client = AmapClient("test-key", transport=httpx.MockTransport(handler))
+    places = await client.search_poi("西湖", city="杭州", limit=1)
+    resource = travel._place_to_resource(places[0])
+
+    assert resource.source_url is not None
+    assert resource.source_url.startswith("https://uri.amap.com/marker?")
+    assert "poiid=B023B13L9M" in resource.source_url

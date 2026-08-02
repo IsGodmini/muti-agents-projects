@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
 from typing import TypeVar
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 
 from app.config import Settings
@@ -24,15 +26,6 @@ async def fetch_images_as_data_urls(
     max_bytes: int = 3_000_000,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[str]:
-    """Download http(s) images and convert to base64 data URLs.
-
-    Ark 多模态模型会自行抓取 URL，图片链接失效/防盗链时容易返回 400
-    （InvalidParameter: Timeout while downloading url）。改为本地下载后
-    以 data URL 发送，由调用方控制下载与大小。
-
-    单个图片下载失败/超时/过大时跳过该图并记录日志；全部失败时返回空列表，
-    调用方可根据需要降级为纯文本请求（LLM API 本身仍会正常调用）。
-    """
     targets = [u for u in urls if str(u).startswith(("http://", "https://"))][:max_images]
     if not targets:
         return []
@@ -45,31 +38,74 @@ async def fetch_images_as_data_urls(
                 transport=transport,
             ) as client:
                 response = await client.get(url)
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    body = response.text[:500]
+                    raise RuntimeError(
+                        f"Image download HTTP {response.status_code}: {body}"
+                    ) from exc
             content = response.content
             if not content or len(content) > max_bytes:
                 logger.warning(
                     "Skip image %s: empty or too large (%d bytes)", url, len(content)
                 )
                 return None
-            content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-            if not content_type.startswith("image/"):
-                content_type = "image/jpeg"
+            # detect image format via magic bytes
+            content_type = _detect_image_mime(content[:16])
+            if not content_type:
+                logger.warning(
+                    "Skip image %s: unknown image format (magic=%s)",
+                    url, content[:8].hex(),
+                )
+                return None
+            # Ark requires min 14px for both dimensions
+            try:
+                with Image.open(io.BytesIO(content)) as img:
+                    w, h = img.size
+                if w < 14 or h < 14:
+                    logger.warning(
+                        "Skip image %s: too small (%dx%d, min 14)", url, w, h
+                    )
+                    return None
+            except (OSError, UnidentifiedImageError):
+                logger.warning("Skip image %s: cannot parse dimensions", url)
+                return None
             encoded = base64.b64encode(content).decode("ascii")
             return f"data:{content_type};base64,{encoded}"
-        except Exception as exc:  # noqa: BLE001 - 单个图片失败不阻断整体
+        except (httpx.HTTPError, RuntimeError, OSError) as exc:
             logger.warning("Skip image %s: %s: %s", url, type(exc).__name__, str(exc)[:120])
             return None
 
     results = await asyncio.gather(*(fetch_one(u) for u in targets))
     data_urls = [r for r in results if r]
     if len(data_urls) < len(targets):
-        logger.warning("图片下载成功 %d/%d", len(data_urls), len(targets))
+        logger.warning("\u56fe\u7247\u4e0b\u8f7d\u6210\u529f %d/%d", len(data_urls), len(targets))
     return data_urls
 
 
+def _detect_image_mime(head: bytes) -> str | None:
+    if len(head) < 4:
+        return None
+    # PNG
+    if head[:4] == b'\x89PNG':
+        return "image/png"
+    # JPEG
+    if head[:3] == b'\xff\xd8\xff':
+        return "image/jpeg"
+    # GIF
+    if head[:4] in (b'GIF8',):
+        return "image/gif"
+    # WebP
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        return "image/webp"
+    # BMP
+    if head[:2] == b'BM':
+        return "image/bmp"
+    return None
+
+
 def _schema_hint(schema: type[BaseModel]) -> str:
-    """Build a concise field description instead of dumping full JSON Schema."""
     props = schema.model_json_schema().get("properties", {})
     lines = []
     for name, info in props.items():
@@ -80,14 +116,12 @@ def _schema_hint(schema: type[BaseModel]) -> str:
         if desc:
             hint += f"  ({desc})"
         if default is not None:
-            hint += f"  [默认: {default}]"
+            hint += f"  [\u9ed8\u8ba4: {default}]"
         lines.append(hint)
     return "\n".join(lines)
 
 
 class ModelGateway:
-    """OpenAI-compatible gateway for LLM services (Ark, Ollama, etc.)."""
-
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -101,6 +135,7 @@ class ModelGateway:
         temperature: float = 0.2,
         timeout_seconds: float = 60,
         image_urls: list[str] | None = None,
+        max_attempts: int | None = None,
     ) -> SchemaT:
         if self.settings.mock_model_mode:
             raise RuntimeError("Mock mode expects deterministic graph nodes, not model calls.")
@@ -108,8 +143,8 @@ class ModelGateway:
         hint = _schema_hint(schema)
         full_system = (
             f"{system_prompt}\n\n"
-            f"请输出一个 JSON 对象，字段如下：\n{hint}\n\n"
-            "重要：直接输出 JSON，不要输出思考过程、解释、markdown 或其他文字。"
+            f"\u8bf7\u8f93\u51fa\u4e00\u4e2a JSON \u5bf9\u8c61\uff0c\u5b57\u6bb5\u5982\u4e0b\uff1a\n{hint}\n\n"
+            "\u91cd\u8981\uff1a\u76f4\u63a5\u8f93\u51fa JSON\uff0c\u4e0d\u8981\u8f93\u51fa\u601d\u8003\u8fc7\u7a0b\u3001\u89e3\u91ca\u3001markdown \u6216\u5176\u4ed6\u6587\u5b57\u3002"
         )
 
         api_key = self.settings.llm_api_key.get_secret_value()
@@ -128,30 +163,58 @@ class ModelGateway:
             ],
             "response_format": {"type": "json_object"},
             "temperature": temperature,
-            "thinking": {"type": "disabled"},
         }
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            response = await client.post(
-                f"{self.settings.llm_base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
+        attempt_limit = max_attempts or self.settings.llm_max_attempts
+        last_error: Exception | None = None
+        for attempt in range(1, attempt_limit + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout_seconds, trust_env=False) as client:
+                    response = await client.post(
+                        f"{self.settings.llm_base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                if response.status_code == 429 or response.status_code >= 500:
+                    body = response.text[:500]
+                    raise httpx.HTTPStatusError(
+                        f"retryable LLM API {response.status_code}: {body}",
+                        request=response.request,
+                        response=response,
+                    )
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    body = response.text[:500]
+                    raise RuntimeError(f"LLM API {response.status_code}: {body}") from exc
 
-        content = response.json()["choices"][0]["message"]["content"]
-        content = _extract_json(content)
-        return schema.model_validate_json(content)
+                content = response.json()["choices"][0]["message"]["content"]
+                return schema.model_validate_json(_extract_json(content))
+            except RuntimeError:
+                raise
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                last_error = exc
+                if attempt >= attempt_limit:
+                    break
+                delay = min(4.0, 1.5 * attempt)
+                logger.warning(
+                    "LLM attempt %d/%d failed for %s: %s; retrying in %.1fs",
+                    attempt,
+                    attempt_limit,
+                    model or self.settings.llm_model,
+                    type(exc).__name__,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+        assert last_error is not None
+        raise last_error
 
 
 def _extract_json(text: str) -> str:
-    """Return the first complete JSON value embedded in the model response.
-
-    Strips markdown fences and any leading/trailing non-JSON text.
-    """
     text = text.strip()
     if "```" in text:
         for part in text.split("```"):

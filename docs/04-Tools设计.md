@@ -42,9 +42,9 @@ Registry 同时提供：
 | --- | --- | --- | --- | --- |
 | `search_attractions` | 通过 Tavily Remote MCP 检索目的地网页资源 | READ_ONLY | 异步 | mcp_search |
 | `search_poi_amap` | 高德 POI 结构化检索（坐标、评分、分类） | READ_ONLY | 异步 | geo_search |
-| `get_weather_forecast` | 和风天气逐日预报（行程编排参考） | READ_ONLY | 异步 | geo_search |
+| `get_weather_forecast` | 和风天气逐日预报，失败时显式降级到高德天气 | READ_ONLY | 异步 | geo_search |
 | `calculate_route_matrix` | 合并高德真实时长与 LLM 估算，构造完整交通矩阵 | READ_ONLY | 异步 | geo_compute |
-| `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并按天分组 | WRITE_INTERNAL | 同步 | optimization |
+| `optimize_itinerary` | 使用 OR-Tools 求解访问顺序并返回与请求天数等长的分组 | WRITE_INTERNAL | 同步 | optimization |
 | `calculate_product_cost` | 从 LLM 估算的成本明细计算售价与毛利 | READ_ONLY | 同步 | pricing |
 | `submit_for_approval` | 持久化人工审批决定 | EXTERNAL_ACTION | 同步 | approval |
 
@@ -77,8 +77,16 @@ Registry 同时提供：
 - 写操作必须有幂等策略（如版本号自增）。
 - 不包含硬编码业务数据，所有输入来自真实搜索结果或 LLM 估算。
 - 外部数据（网页搜索）先经过 Guard 注入防护再进入上下文。
+- 任何代表“免费/已含/自理/待确认”的零值都不能直接进入 `QuoteItem`；成本工具只接受正金额明细。
 
-## 6. MCP 的位置
+## 6. 少资源与外部服务降级
+
+- `retrieve_resources` 并行调用 Tavily 与高德，可容忍单个来源失败；所有来源失败或过滤后无可用景点才终止。
+- `get_weather_forecast` 优先调用和风天气，和风未配置或请求失败时尝试高德；结果携带 `provider`，报告会标注真实来源。
+- `optimize_itinerary` 对 0 个或 1 个资源的特殊分支同样返回 `days` 个日槽，避免把“四日游”错误压缩成一天。
+- `calculate_product_cost` 的输入明细必须 `amount > 0`。LLM 输出层允许暂时出现 0，策划节点先过滤；如果没有任何正金额明细，使用住宿、交通、餐饮和服务的保守估算。
+
+## 7. MCP 的位置
 
 项目作为 MCP Client 接入 Tavily Remote MCP：
 
@@ -94,7 +102,7 @@ retrieve_resources 节点
 
 当前项目是 MCP Client，而不是自建 MCP Server。后续可以把地图、内部资源库等工具封装成 MCP Server 供复用。详细实现参见 [11-Tavily-MCP真实搜索](./11-Tavily-MCP真实搜索.md)。
 
-## 7. 权限模型
+## 8. 权限模型
 
 建议采用三层约束：
 
@@ -108,7 +116,7 @@ retrieve_resources 节点
 
 即使模型在文本中要求调用未授权工具，执行层也必须拒绝。
 
-## 8. 安全检查清单
+## 9. 安全检查清单
 
 - [x] 工具参数经过 Schema 校验。
 - [x] 节点只调用自己绑定的工具。
@@ -116,4 +124,6 @@ retrieve_resources 节点
 - [x] 写操作幂等（版本自增）。
 - [x] 返回内容的 Prompt Injection 检测（`app/services/guard.py`，检索节点实时过滤）。
 - [x] 外部资源标记来源和检索时间（provider / source_url / retrieved_at）。
+- [x] 行程分组保持请求天数，少资源场景有回归测试。
+- [x] 天气和图片降级均保留来源，缺失必需交付资产时阻断。
 - [ ] 工具耗时、状态与错误码的结构化日志及审计导出（生产化补充）。

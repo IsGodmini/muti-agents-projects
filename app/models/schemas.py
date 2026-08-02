@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ProductType(StrEnum):
@@ -36,6 +36,11 @@ class PlanRequest(BaseModel):
     product_type: ProductType
     destination: str = Field(min_length=2, max_length=80)
     departure_date: date | None = Field(default=None, description="出发日期（YYYY-MM-DD）")
+    departure_time_note: str = Field(
+        default="",
+        max_length=80,
+        description="用户表达的出发时间，可为假期或大致时段",
+    )
     days: int = Field(ge=1, le=15)
     nights: int = Field(ge=0, le=14)
     group_size: int = Field(ge=1, le=500)
@@ -116,7 +121,9 @@ class ItineraryEvent(BaseModel):
     resource_id: str | None = None
     category: str
     description: str
-    cost_per_person: int = 0
+    cost_per_person: int = Field(default=0, ge=0)
+    cost_status: Literal["estimated", "free", "included", "optional", "unknown"] = "unknown"
+    cost_note: str = ""
 
 
 class ItineraryDay(BaseModel):
@@ -147,7 +154,7 @@ class ConstraintReport(BaseModel):
 class QuoteItem(BaseModel):
     category: str
     description: str
-    amount: int
+    amount: int = Field(gt=0)
 
 
 class Quote(BaseModel):
@@ -197,18 +204,13 @@ class PlanRunResponse(BaseModel):
 
 
 
-class ToolSummary(BaseModel):
-    name: str
-    description: str
-    risk_level: str
-    category: str
-
-
 # ---------- LLM structured-output schemas ----------
 
 
 class EnrichedResourceInfo(BaseModel):
     index: int = Field(default=-1, description="资源在输入列表中的序号，从 0 开始")
+    normalized_name: str = Field(default="", description="可实际到访的地点标准名称")
+    is_visitable: bool = Field(default=True, description="是否是可直接到访的单一地点或活动")
     category: str
     estimated_price_per_person: int = Field(ge=0)
     recommended_minutes: int = Field(default=120, ge=0, le=480)
@@ -238,7 +240,18 @@ class TravelTimePair(BaseModel):
     time: int = Field(
         ge=5, le=300,
         description="预估交通时间（分钟）",
-        validation_alias=AliasChoices("time", "duration", "travel_time", "duration_min"),
+        validation_alias=AliasChoices(
+            "time",
+            "duration",
+            "travel_time",
+            "duration_min",
+            "duration_minutes",
+            "estimated_time_minutes",
+            "estimated_duration_minutes",
+            "travel_time_minutes",
+            "time_minutes",
+            "minutes",
+        ),
     )
 
 
@@ -271,7 +284,7 @@ class ScheduledEvent(BaseModel):
 class DailySchedule(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    day: int
+    day: int = Field(default=1, description="日序号；缺省时由调用方按当前生成日回填")
     theme: str = ""
     events: list[ScheduledEvent] = Field(
         validation_alias=AliasChoices("events", "activities", "schedule"),
@@ -285,18 +298,28 @@ class ScheduleBatch(BaseModel):
 class CostItemEstimate(BaseModel):
     category: str
     description: str = ""
-    amount: int = Field(ge=0)
+    amount: int = Field(ge=0, description="团队总金额；0 表示免费或已包含，后续会过滤")
 
 
 class CostBreakdown(BaseModel):
-    items: list[CostItemEstimate]
+    items: list[CostItemEstimate] = Field(min_length=1)
     cost_notes: str = ""
 
 
 class PlannerConversation(BaseModel):
     ready: bool = Field(description="信息是否足够开始策划")
+    stage: Literal["collecting", "notes", "confirming", "ready"] = Field(
+        default="collecting",
+        description="对话阶段：收集必要信息/询问注意事项/等待确认/已确认",
+    )
     question: str = Field(default="", description="不够时向用户提的下一个问题")
     departure_date: str = Field(default="", description="出发日期，格式 YYYY-MM-DD，未知留空")
+    departure_time_note: str = Field(
+        default="",
+        description="用户原始出发时间表达，如国庆期间、8月初、下周末",
+    )
+    notes_collected: bool = Field(default=False, description="是否已单独询问并收集其他注意事项")
+    user_confirmed: bool = Field(default=False, description="用户是否已明确确认最终需求摘要")
     title: str = Field(default="", description="产品名称")
     product_type: str = Field(default="family_trip", description="family_trip/study_tour/corporate_team_building/senior_friendly")
     destination: str = Field(default="")
@@ -315,3 +338,33 @@ class PlannerConversation(BaseModel):
     hard_constraints: list[str] = Field(default_factory=list)
     soft_preferences: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list, description="Agent 做出的假设，需用户确认")
+
+    @field_validator("stage", mode="before")
+    @classmethod
+    def normalize_stage(cls, value: object) -> str:
+        if not isinstance(value, str):
+            return "collecting"
+        normalized = value.strip().lower().replace("_", "").replace("-", "")
+        aliases = {
+            "collecting": "collecting",
+            "collect": "collecting",
+            "收集中": "collecting",
+            "收集信息": "collecting",
+            "需求收集": "collecting",
+            "notes": "notes",
+            "note": "notes",
+            "注意事项": "notes",
+            "询问注意事项": "notes",
+            "补充信息": "notes",
+            "confirming": "confirming",
+            "confirm": "confirming",
+            "等待确认": "confirming",
+            "确认中": "confirming",
+            "需求确认": "confirming",
+            "ready": "ready",
+            "confirmed": "ready",
+            "已确认": "ready",
+            "确认完成": "ready",
+            "已就绪": "ready",
+        }
+        return aliases.get(normalized, "collecting")

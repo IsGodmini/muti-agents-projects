@@ -32,7 +32,7 @@ sequenceDiagram
 - 鉴权：`Authorization: Bearer <TAVILY_API_KEY>`。
 - SDK：官方 `mcp` Python SDK 1.x 稳定版本。
 
-API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返回（健康检查只返回 `tavily_mcp_configured` 布尔值）。
+API Key 不拼接到 URL，不写入异常消息，也不会由健康检查返回；当前健康检查只返回 `status` 与 `mock_model_mode`。
 
 ## 4. 搜索参数
 
@@ -98,7 +98,7 @@ Tavily MCP 的搜索结果支持两种解析：
 失败处理分两层：
 
 - **工具层**：未配置 API Key 或 `TAVILY_SEARCH_ENABLED=false` 时，`search_attractions` 明确抛出 `MCPToolError`，不静默降级到演示数据。
-- **节点层**：`retrieve_resources` 与高德 POI 双路并行检索，**任一检索源失败即抛出异常**，工作流终止并向 API/前端返回错误。
+- **节点层**：`retrieve_resources` 与高德 POI 双路并行检索。单个来源失败会被记录并允许另一来源继续；只有所有来源失败，或安全/偏好过滤后没有可访问景点，工作流才终止。
 
 > 早期版本在 `app/config.py` 中保留过 `tavily_fallback_to_demo` 字段，现已移除；`tests/conftest.py` 中设置的 `TAVILY_FALLBACK_TO_DEMO` 环境变量会被配置忽略，测试通过 Mock 工具实现离线运行。
 
@@ -120,6 +120,7 @@ MCP 是异步网络调用，因此 Tool Registry 同时支持：
 - `search_attractions` 在配置密钥时走 MCP 分支（Fake Service）。
 - 异步 Tool 必须通过 `ainvoke` 调用。
 - 未配置密钥时抛出 `MCPToolError`。
+- 高德结果保留可追溯的官方 marker URL；双路检索容错由 Graph 测试覆盖。
 
 ## 9. 后续增强
 

@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass, field
 
 from app.models.schemas import ItineraryDay, PlanRequest, Quote
+from app.services.resource_matching import matches_place_name
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ def verify_plan(
     """Run all verification checks and produce a report."""
     checks: list[VerificationCheck] = []
 
+    checks.append(_check_day_coverage(request, itinerary))
     checks.append(_check_no_empty_days(itinerary))
     checks.append(_check_no_time_conflicts(itinerary))
     checks.append(_check_daily_duration(itinerary, request))
@@ -60,6 +62,30 @@ def verify_plan(
     )
     logger.info("Verification: %d/%d passed, score=%d", passed_count, len(checks), score)
     return report
+
+
+def _check_day_coverage(
+    request: PlanRequest,
+    itinerary: list[ItineraryDay],
+) -> VerificationCheck:
+    expected = set(range(1, request.days + 1))
+    actual = {day.day for day in itinerary}
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if missing or unexpected or len(itinerary) != request.days:
+        details = []
+        if missing:
+            details.append(f"缺少 Day {missing}")
+        if unexpected:
+            details.append(f"多出 Day {unexpected}")
+        if len(itinerary) != request.days and not details:
+            details.append(f"实际 {len(itinerary)} 天，请求 {request.days} 天")
+        return VerificationCheck(
+            "day_coverage",
+            False,
+            f"BLOCKING: 行程天数不完整（{'; '.join(details)}）",
+        )
+    return VerificationCheck("day_coverage", True, f"完整覆盖 {request.days} 天行程")
 
 
 def _check_no_empty_days(itinerary: list[ItineraryDay]) -> VerificationCheck:
@@ -106,9 +132,12 @@ def _check_daily_duration(itinerary: list[ItineraryDay], request: PlanRequest) -
 def _check_must_visit_coverage(request: PlanRequest, itinerary: list[ItineraryDay]) -> VerificationCheck:
     if not request.must_visit:
         return VerificationCheck("must_visit", True, "无必去要求")
-    names = {e.title for d in itinerary for e in d.events}
-    text = " ".join(names).lower()
-    missing = [mv for mv in request.must_visit if mv.lower() not in text]
+    names = {event.title for day in itinerary for event in day.events}
+    missing = [
+        must_visit
+        for must_visit in request.must_visit
+        if not any(matches_place_name(name, must_visit) for name in names)
+    ]
     if missing:
         return VerificationCheck("must_visit", False, f"BLOCKING: 未覆盖: {missing}")
     return VerificationCheck("must_visit", True, f"全部 {len(request.must_visit)} 个必去已覆盖")
@@ -128,11 +157,22 @@ def _check_avoid_violations(request: PlanRequest, itinerary: list[ItineraryDay])
 def _check_budget(request: PlanRequest, quote: Quote | None) -> VerificationCheck:
     if not quote:
         return VerificationCheck("budget", False, "无报价数据")
-    budget_total = request.budget_per_person * request.group_size
-    error_rate = abs(quote.total_cost - budget_total) / max(budget_total, 1)
-    if error_rate > 0.3:
-        return VerificationCheck("budget", False, f"预算偏差 {error_rate:.0%} > 30%")
-    return VerificationCheck("budget", True, f"预算偏差 {error_rate:.0%}")
+    if quote.cost_per_person > request.budget_per_person:
+        return VerificationCheck(
+            "budget",
+            False,
+            "BLOCKING: 人均成本 "
+            f"¥{quote.cost_per_person} 超过预算 ¥{request.budget_per_person}",
+        )
+    if quote.sale_price_per_person > request.budget_per_person:
+        return VerificationCheck(
+            "budget",
+            False,
+            "BLOCKING: 人均售价 "
+            f"¥{quote.sale_price_per_person} 超过预算 ¥{request.budget_per_person}",
+        )
+    headroom = request.budget_per_person - quote.sale_price_per_person
+    return VerificationCheck("budget", True, f"人均售价在预算内，余量 ¥{headroom}")
 
 
 def _check_event_count(itinerary: list[ItineraryDay], request: PlanRequest) -> VerificationCheck:
@@ -155,7 +195,9 @@ def _check_lunch_break(itinerary: list[ItineraryDay]) -> VerificationCheck:
         if day.events and not has_lunch:
             missing_lunch.append(day.day)
     if missing_lunch:
-        return VerificationCheck("lunch_break", False, f"缺少午休: Day {missing_lunch}")
+        return VerificationCheck(
+            "lunch_break", False, f"BLOCKING: 缺少午餐或午休: Day {missing_lunch}"
+        )
     return VerificationCheck("lunch_break", True, "每天都有休息/用餐安排")
 
 

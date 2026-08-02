@@ -22,9 +22,6 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
 
-FORCE_KEYWORDS = {"开始", "开始吧", "够了", "就这样", "可以了", "go", "start", "ok", "好"}
-
-
 def header(text: str) -> None:
     print(f"\n{BOLD}{CYAN}{'━' * 56}{RESET}")
     print(f"{BOLD}{CYAN}  {text}{RESET}")
@@ -76,14 +73,14 @@ async def converse_until_ready() -> PlanRequest:
 
         try:
             response = await gateway.structured_completion(
-                model=settings.llm_model_multimodal,
+                model=settings.llm_model,
                 system_prompt=PARSE_USER_INPUT_SYSTEM,
                 user_prompt=f"以下是目前的对话：\n{conversation_text}",
                 schema=PlannerConversation,
-                timeout_seconds=30,
+                timeout_seconds=60,
             )
         except Exception as exc:  # noqa: BLE001
-            error(f"理解失败: {exc}")
+            error(f"理解失败 [{type(exc).__name__}]: {exc or '请检查网络连接或 API 配置'}")
             retry = input(f"  {BOLD}👤 再说一次: {RESET}").strip()
             history.append(f"用户：{retry}")
             continue
@@ -95,6 +92,7 @@ async def converse_until_ready() -> PlanRequest:
                 product_type=response.product_type,
                 destination=response.destination,
                 departure_date=_parse_date(response.departure_date),
+                departure_time_note=response.departure_time_note or response.departure_date,
                 days=response.days,
                 nights=nights,
                 group_size=response.group_size,
@@ -112,45 +110,8 @@ async def converse_until_ready() -> PlanRequest:
             )
 
         agent_say(response.question)
+        history.append(f"顾问：{response.question}")
         user_input = input(f"  {BOLD}👤 {RESET}").strip()
-
-        if user_input.lower() in FORCE_KEYWORDS:
-            history.append("用户：信息够了，直接开始策划。")
-            try:
-                final = await gateway.structured_completion(
-                    model=settings.llm_model_multimodal,
-                    system_prompt=PARSE_USER_INPUT_SYSTEM,
-                    user_prompt=(
-                        f"以下是目前的对话：\n{chr(10).join(history)}\n\n"
-                        "用户要求立即开始。用已有信息填写所有字段，ready 必须为 true。"
-                    ),
-                    schema=PlannerConversation,
-                    timeout_seconds=30,
-                )
-                nights = min(final.nights, final.days - 1)
-                return PlanRequest(
-                    title=final.title or f"{final.destination}旅行",
-                    product_type=final.product_type,
-                    destination=final.destination,
-                    departure_date=_parse_date(final.departure_date),
-                    days=final.days,
-                    nights=nights,
-                    group_size=final.group_size,
-                    budget_per_person=final.budget_per_person,
-                    target_margin_rate=final.target_margin_rate,
-                    target_audience=final.target_audience or "普通游客",
-                    themes=final.themes,
-                    pace=final.pace,
-                    interests=final.interests,
-                    must_visit=final.must_visit,
-                    avoid=final.avoid,
-                    transport_preferences=final.transport_preferences or ["public_transit", "walking"],
-                    hard_constraints=final.hard_constraints,
-                    soft_preferences=final.soft_preferences,
-                )
-            except Exception:  # noqa: BLE001
-                error("无法生成方案，请补充目的地和天数。")
-                continue
 
         if not user_input:
             continue
@@ -287,7 +248,7 @@ async def main() -> None:
             print(f"\n\n  {DIM}再见！{RESET}\n")
             break
         except Exception as exc:  # noqa: BLE001
-            error(f"执行失败: {exc}")
+            error(f"执行失败 [{type(exc).__name__}]: {exc or '请检查网络连接或 API 配置'}")
             import traceback
             traceback.print_exc()
 

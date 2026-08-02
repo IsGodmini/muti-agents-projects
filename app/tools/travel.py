@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 
+import httpx
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from pydantic import BaseModel, Field
 
@@ -54,6 +55,8 @@ def _place_to_resource(place) -> ResourceCandidate:
         audience_tags=place.categories[:3],
         evidence=f"Gaode POI / {place.place_id}",
         score=min(1.0, place.rating / 5.0) if place.rating else 0.5,
+        source_url=place.source_url,
+        source_title=f"高德地图：{place.name}",
         provider="amap",
         summary=place.summary,
         lng=place.coordinates.lng if place.coordinates.lng else None,
@@ -75,12 +78,37 @@ class WeatherForecastInput(BaseModel):
 )
 async def get_weather_forecast(payload: WeatherForecastInput) -> list[dict]:
     settings = get_settings()
-    if not settings.weather_api_key:
-        raise MCPToolError("Weather forecast requires WEATHER_API_KEY")
     from app.services.weather import WeatherClient
 
-    client = WeatherClient(settings.weather_api_key, settings.weather_base_url)
-    return await client.get_forecast(payload.city, days=payload.days)
+    qweather_error: Exception | None = None
+    weather_api_key = getattr(settings, "weather_api_key", "")
+    if weather_api_key:
+        client = WeatherClient(
+            weather_api_key,
+            getattr(settings, "weather_base_url", "https://devapi.qweather.com/v7"),
+            getattr(settings, "weather_geo_base_url", ""),
+        )
+        try:
+            forecasts = await client.get_forecast(payload.city, days=payload.days)
+            for item in forecasts:
+                item.setdefault("provider", "qweather")
+            return forecasts
+        except (httpx.HTTPError, RuntimeError) as exc:
+            qweather_error = exc
+            logger.warning("QWeather unavailable; trying Amap weather: %s", exc)
+
+    amap_api_key = getattr(settings, "amap_api_key", "")
+    if amap_api_key:
+        amap = AmapClient(
+            amap_api_key,
+            getattr(settings, "amap_base_url", "https://restapi.amap.com/v3"),
+        )
+        return await amap.weather_forecast(payload.city, days=payload.days)
+
+    detail = f"; QWeather error: {qweather_error}" if qweather_error else ""
+    raise MCPToolError(
+        "Weather forecast requires a valid WEATHER_API_KEY or AMAP_API_KEY" + detail
+    )
 
 
 class SearchResourcesInput(BaseModel):
@@ -232,7 +260,7 @@ class OptimizeRouteInput(BaseModel):
 def optimize_itinerary(payload: OptimizeRouteInput) -> list[list[str]]:
     resource_count = len(payload.resource_ids)
     if resource_count <= 1:
-        return [payload.resource_ids]
+        return [payload.resource_ids if day_index == 0 else [] for day_index in range(payload.days)]
 
     manager = pywrapcp.RoutingIndexManager(resource_count, 1, 0)
     routing = pywrapcp.RoutingModel(manager)
@@ -275,6 +303,7 @@ class QuoteInput(BaseModel):
     target_margin_rate: float = Field(ge=0, le=0.8)
     budget_per_person: int = Field(ge=100)
     cost_items: list[QuoteItem] = Field(
+        min_length=1,
         description="LLM 估算的成本明细",
     )
 

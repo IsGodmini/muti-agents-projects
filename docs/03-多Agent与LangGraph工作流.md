@@ -12,7 +12,7 @@
 
 项目避免让多个 Agent 无限制互相聊天，而是使用有向状态图建立可预测的执行顺序。每个节点直接绑定自己需要的 Tools，不存在中间 Skill 调度层。
 
-另外，对话式需求收集独立成图（`app/agents/chat_graph.py`），负责把自然语言对话转成结构化 `PlanRequest`，供 CLI 与 `/api/v1/chat` 复用。
+另外，对话式需求收集独立成图（`app/agents/chat_graph.py`），负责把自然语言对话转成结构化 `PlanRequest`。它强制执行必要信息、额外注意事项和用户确认三道门禁，Web 与 CLI 共用同一逻辑。
 
 ## 2. 节点分工
 
@@ -20,13 +20,13 @@
 | --- | --- | --- | --- |
 | retrieve_resources | 双路检索、防护过滤、充实并排序候选资源 | 目的地、主题、人群 | ResourceCandidate[] |
 | plan_itinerary | 获取天气、估算交通、优化路线、编排行程 | 候选资源、天数 | ItineraryDay[]、路线矩阵、天气 |
-| validate_constraints | 检查空日程、时间冲突、每日跨度等硬性约束 | 行程 | ConstraintReport |
+| validate_constraints | 检查天数覆盖、空日程、重复资源、时间冲突、午餐和每日跨度 | 行程 | ConstraintReport |
 | repair_plan | 约束失败时搜索替代资源 | 问题清单 | 补充后的资源 |
 | calculate_quote | 估算成本并计算售价 | 行程、人数、预算 | Quote |
 | quality_review | 多维度质量评分 | 完整方案 | QualityReport |
-| run_verification | 确定性可行性检查（8 项） | 行程 + 报价 | 验证得分 |
+| run_verification | 确定性可行性检查（9 项，天数覆盖为首项） | 行程 + 报价 | 验证得分与阻断数量 |
 | review_repair | 审核不达标时重排行程（重试环路） | 审核问题 | 重试计数 |
-| prepare_poster | 生成封面海报 + 按天 1-3 张分日插图 | 方案 Brief | 海报资产 + 分日图片组 |
+| prepare_poster | 顺序生成封面和每日插图，失败时尝试真实图片/地图 | 方案 Brief | 完整海报资产 + 分日图片组 |
 | approval_gate | 人工审批中断（`interrupt()`） | 方案 + 审批载荷 | 审批决定 |
 | finalize_delivery | 生成报告/PDF、存档版本与审批记录 | 已批准方案 | 交付结果 |
 | mark_failed | 终止（约束/审核多次未通过） | 错误列表 | 失败状态 |
@@ -45,11 +45,12 @@ flowchart TD
     RP --> I
     C --> Q["quality_review"]
     Q --> VER["run_verification"]
-    VER -->|得分均≥60| PO["prepare_poster"]
+    VER -->|无阻断且得分均≥60| PO["prepare_poster"]
     VER -->|不达标且可修复| RR["review_repair"]
     VER -->|超过修复上限| F
     RR --> I
-    PO --> G["approval_gate ⏸ interrupt()"]
+    PO -->|图片完整| G["approval_gate ⏸ interrupt()"]
+    PO -->|图片不完整| F
     G -->|批准| D["finalize_delivery"]
     G -->|驳回| RJ["mark_rejected"]
     D --> E["END"]
@@ -57,10 +58,10 @@ flowchart TD
     RJ --> E
 ```
 
-两个返工环路（`repair_plan` 与 `review_repair`）共用 `retry_count` 计数，合计最多 2 次：
+两个返工环路保留总 `retry_count` 用于审计，但使用独立上限：
 
-- `repair_plan → plan_itinerary`：约束校验失败后补充替代资源。
-- `review_repair → plan_itinerary`：质量/可行性审核不达标后重排。
+- `repair_plan → plan_itinerary`：`constraint_retry_count` 最多 2 次，约束失败后补充替代资源或重新编排。
+- `review_repair → plan_itinerary`：`review_retry_count` 最多 2 次，质量/可行性审核不达标后重排。
 
 ## 4. `PlanningState`
 
@@ -80,18 +81,25 @@ class PlanningState(TypedDict, total=False):
     quote: Quote
     quality_report: QualityReport
     verification_score: int
+    verification_passed: bool
+    verification_blocking_count: int
+    verification_issues: list[str]
     approval: dict[str, Any]
     poster_brief: PosterBrief
     poster_asset: dict[str, str]
     day_image_paths: list[list[str]]
+    poster_ready: bool
     report_markdown: str
     report_path: str
     current_stage: str
     retry_count: int
+    constraint_retry_count: int
+    review_retry_count: int
+    repair_feedback: list[str]
     errors: list[str]
 ```
 
-对话图状态（`ChatState`）独立维护：`thread_id`、`messages`、`conversation`（`PlannerConversation`）、`plan_request`、`ready`。
+对话图状态（`ChatState`）独立维护：`thread_id`、`messages`、`conversation`、`plan_request`、`ready`、`stage` 与 `reply`。合法阶段只有 `collecting`、`notes`、`confirming`、`ready`；模型返回中文或英文别名时先归一化。
 
 设计原则：
 
@@ -103,9 +111,11 @@ class PlanningState(TypedDict, total=False):
 
 三个条件路由函数都是确定性 Python 逻辑，便于单元测试：
 
-- `constraint_route`：校验通过 → `calculate_quote`；失败且 `retry_count < 2` → `repair_plan`；否则 → `mark_failed`。
-- `review_decision`：`verification_score ≥ 60` 且 `quality_score ≥ 60` → `prepare_poster`；不达标且 `retry_count < 2` → `review_repair`；否则 → `mark_failed`。
+- `constraint_route`：校验通过 → `calculate_quote`；失败且 `constraint_retry_count < 2` → `repair_plan`；否则 → `mark_failed`。
+- `review_decision`：确定性阻断数量为 0、LLM 无 blocking issue、约束有效且双评分均 ≥60 → `prepare_poster`；否则在 `review_retry_count < 2` 时修复，超过上限失败。
 - `approval_route`：`approval.approved == true` → `finalize_delivery`；驳回 → `mark_rejected`。
+
+`prepare_poster` 之后还有 `poster_route`：只有封面和每一天的图片都已就绪才进入审批，否则直接失败，避免再次出现 PDF 缺图。
 
 业务决策从 Prompt 中抽离到路由函数，模型只负责生成内容，不负责流程控制。
 
@@ -136,7 +146,7 @@ def approval_gate(state: PlanningState) -> dict:
 5. CLI 或 API 使用 `Command(resume={"approved": ..., "reviewer_id": ...})` 恢复同一 `thread_id`。
 6. `approval_route` 按决定路由：批准 → `finalize_delivery`（交付 + 记录审批）；驳回 → `mark_rejected`（记录驳回决定）。
 
-当前使用 `MemorySaver`，进程重启后状态会丢失。生产环境应改用持久化 checkpoint，并保证 `thread_id` 唯一。
+当前使用带应用类型白名单的 `MemorySaver`（`app/agents/checkpoint.py`），避免不受信任类型进入 checkpoint 反序列化。进程重启后状态仍会丢失，生产环境应换持久化 checkpoint。
 
 ## 7. 节点实现约束
 
@@ -166,9 +176,10 @@ async def _llm_cost_estimation(settings, state):
 
 ## 8. 重试与幂等
 
-- 模型生成：结构化输出失败即抛出异常，工作流终止（仅测试用 `MOCK_MODEL_MODE=true` 走确定性路径）。
+- 模型生成：网关按 `LLM_MAX_ATTEMPTS` 做有限重试并修正常见字段别名；仍无法通过 Pydantic 校验时抛出异常。
 - 查询工具（search_attractions / search_poi_amap）：可安全重试。
 - 计算工具（route_matrix、product_cost）：相同输入产生相同结果。
+- 路线分日：即使只有 0～1 个资源，也必须返回与请求天数相同的日槽；空槽由自由活动/休整日补齐。
 - 保存版本：使用 `plan_id + version` 自增，快照不可变。
 
 ## 9. 如何增加一个节点

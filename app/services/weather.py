@@ -3,7 +3,7 @@
 Provides multi-day forecast for travel planning.
 Docs: https://dev.qweather.com/docs/api/
 
-使用两个和风天气服务：
+使用和风天气专属 API Host：
 - GeoAPI v2 城市搜索（/geo/v2/city/lookup）：把城市名解析为经纬度
 - 每日天气预报 v1（/weather/v1/daily/{lat}/{lng}）：获取 1-10 天逐日预报
 """
@@ -32,6 +32,7 @@ class WeatherClient:
         self,
         api_key: str,
         base_url: str = "https://devapi.qweather.com/v7",
+        geo_base_url: str = "https://geoapi.qweather.com/v2",
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """transport 仅供测试注入 MockTransport。"""
@@ -41,13 +42,30 @@ class WeatherClient:
         root = base_url.rstrip("/")
         root = root.removesuffix("/v7")
         self.host_root = root.rstrip("/")
+        requested_geo_root = geo_base_url.rstrip("/")
+        # 2026 年起旧共享域名逐步停服。默认与天气 API 共用专属 Host。
+        if not requested_geo_root or any(
+            legacy in requested_geo_root
+            for legacy in ("geoapi.qweather.com", "devapi.qweather.com", "api.qweather.com")
+        ):
+            self.geo_host_root = self.host_root
+        else:
+            self.geo_host_root = requested_geo_root.removesuffix("/v2").removesuffix("/geo")
+
+    def _geo_api_url(self, path: str) -> str:
+        return f"{self.geo_host_root}{path}"
 
     def _api_url(self, path: str) -> str:
         return f"{self.host_root}{path}"
 
     async def _get(self, url: str, params: dict[str, str]) -> dict:
+        headers = (
+            {"Authorization": f"Bearer {self.api_key}"}
+            if self.api_key.count(".") == 2
+            else {"X-QW-Api-Key": self.api_key}
+        )
         async with httpx.AsyncClient(timeout=10, transport=self._transport) as client:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers)
             response.raise_for_status()
             return response.json()
 
@@ -65,10 +83,9 @@ class WeatherClient:
             params = {
                 "location": city,
                 "number": "5",
-                "key": self.api_key,
                 **extra_params,
             }
-            data = await self._get(self._api_url("/geo/v2/city/lookup"), params)
+            data = await self._get(self._geo_api_url("/geo/v2/city/lookup"), params)
             if data.get("code") != "200":
                 raise RuntimeError(f"QWeather GeoAPI error: code={data.get('code')}")
             return data.get("location") or []
@@ -100,7 +117,6 @@ class WeatherClient:
             "days": str(forecast_days),
             "localTime": "true",
             "lang": "zh",
-            "key": self.api_key,
         }
         data = await self._get(
             self._api_url(f"/weather/v1/daily/{lat}/{lng}"),
@@ -124,5 +140,6 @@ class WeatherClient:
                 "temp_min": _round_temp(day.get("temperatureMin"), default=15),
                 "wind_scale_day": str((daytime.get("wind") or {}).get("scale", "") or "-"),
                 "humidity": round(humidity * 100) if isinstance(humidity, (int, float)) else 60,
+                "provider": "qweather",
             })
         return forecasts

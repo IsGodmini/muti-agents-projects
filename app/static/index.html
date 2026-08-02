@@ -3,374 +3,881 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TripOps AI · 旅行策划</title>
+<title>TripOps · AI 旅行顾问</title>
 <style>
   :root {
-    --navy: #183a5e; --navy2: #38668f; --gold: #d4af37;
-    --bg: #f4f6f8; --card: #ffffff; --ink: #2d343a; --gray: #7a828a;
-    --line: #dee2e8; --ok: #27ae60; --warn: #e67e22; --err: #e74c3c;
+    --bg: #f6f7f5;
+    --surface: #ffffff;
+    --surface-soft: #f0f3f1;
+    --ink: #17201c;
+    --muted: #68736d;
+    --line: #dfe5e1;
+    --brand: #1f5c46;
+    --brand-soft: #e7f1ec;
+    --accent: #d39745;
+    --danger: #a9403a;
+    --shadow: 0 18px 50px rgba(28, 50, 39, .08);
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--ink); }
-  header { background: linear-gradient(135deg, var(--navy), var(--navy2)); color: #fff; padding: 20px 28px; }
-  header h1 { font-size: 22px; letter-spacing: 1px; }
-  header .sub { font-size: 13px; opacity: .85; margin-top: 4px; }
-  header .status { display: flex; gap: 14px; margin-top: 10px; font-size: 12px; flex-wrap: wrap; }
-  header .status span { background: rgba(255,255,255,.12); padding: 3px 10px; border-radius: 12px; }
-  header .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-  .ok { background: var(--ok); } .off { background: #888; }
-  main { max-width: 1080px; margin: 22px auto 60px; padding: 0 18px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
-  .tab { padding: 8px 18px; border-radius: 20px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-size: 14px; }
-  .tab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
-  .panel { display: none; }
-  .panel.active { display: block; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
-  .card h3 { font-size: 15px; color: var(--navy); margin-bottom: 12px; border-left: 4px solid var(--gold); padding-left: 10px; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, textarea, input { font: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
 
-  /* chat */
-  #chat-box { height: 380px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fbfcfe; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
-  .msg.user { align-self: flex-end; background: var(--navy); color: #fff; border-bottom-right-radius: 4px; }
-  .msg.agent { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 4px; }
-  .msg.system { align-self: center; background: #fdf6e3; color: #7a6c2a; font-size: 13px; border: 1px solid #eee3c0; }
-  .input-row { display: flex; gap: 10px; margin-top: 12px; }
-  .input-row input { flex: 1; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
-  button { padding: 11px 22px; border: none; border-radius: 10px; background: var(--navy); color: #fff; font-size: 14px; cursor: pointer; }
-  button:hover { background: var(--navy2); }
-  button:disabled { opacity: .55; cursor: not-allowed; }
-  button.gold { background: var(--gold); color: #fff; }
-  button.green { background: var(--ok); }
-  button.red { background: var(--err); }
+  .topbar {
+    height: 68px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, .88);
+    backdrop-filter: blur(14px);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .topbar-inner {
+    max-width: 1080px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 0 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    color: #fff;
+    background: var(--brand);
+    font-weight: 750;
+    letter-spacing: -.5px;
+  }
+  .brand-name { font-size: 16px; font-weight: 700; letter-spacing: -.2px; }
+  .brand-note { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .top-actions { display: flex; align-items: center; gap: 10px; }
+  .health {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .health-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa39e; }
+  .health-dot.ok { background: #2f986b; box-shadow: 0 0 0 4px rgba(47, 152, 107, .1); }
+  .ghost-button {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    padding: 8px 12px;
+    border-radius: 9px;
+    font-size: 12px;
+  }
+  .ghost-button:hover { border-color: #bac7c0; background: var(--surface-soft); }
 
-  /* form */
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
-  .field label { display: block; font-size: 13px; color: var(--gray); margin-bottom: 5px; }
-  .field input, .field select, .field textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
-  .field.full { grid-column: 1 / -1; }
-  .hint { font-size: 12px; color: var(--gray); margin-top: 6px; }
+  main {
+    max-width: 1080px;
+    margin: 28px auto 54px;
+    padding: 0 22px;
+  }
+  .intro { margin-bottom: 20px; }
+  .intro h1 { font-size: clamp(24px, 4vw, 36px); line-height: 1.2; letter-spacing: -1px; margin: 0; }
+  .intro p { color: var(--muted); margin: 9px 0 0; font-size: 14px; line-height: 1.7; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+  }
 
-  /* progress / result */
-  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-  .step { font-size: 12px; padding: 4px 12px; border-radius: 14px; background: #eef1f5; color: var(--gray); }
-  .step.done { background: #e4f5ec; color: var(--ok); }
-  .step.active { background: #fff3d6; color: var(--warn); }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin: 2px; }
-  .badge.info { background: #e8f0fb; color: var(--navy2); }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-  th { color: var(--gray); font-weight: 600; }
-  .row-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
-  .link { color: var(--navy2); text-decoration: none; font-size: 13px; }
-  .link:hover { text-decoration: underline; }
-  textarea#comment { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 13px; margin-top: 8px; }
-  .hidden { display: none; }
-  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 10px 20px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
-  .toast.show { opacity: 1; }
+  .conversation { min-height: 650px; overflow: hidden; display: flex; flex-direction: column; }
+  .conversation-head {
+    min-height: 68px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .advisor { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--brand-soft);
+    color: var(--brand);
+    font-weight: 750;
+  }
+  .advisor strong { display: block; font-size: 14px; }
+  .advisor span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .conversation-state {
+    color: var(--brand);
+    background: var(--brand-soft);
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+  }
+  #chat-box {
+    flex: 1;
+    min-height: 430px;
+    max-height: 610px;
+    overflow-y: auto;
+    padding: 22px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scroll-behavior: smooth;
+  }
+  .message { display: flex; }
+  .message.user { justify-content: flex-end; }
+  .bubble {
+    max-width: min(78%, 570px);
+    padding: 11px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .message.agent .bubble { background: var(--surface-soft); border-bottom-left-radius: 4px; }
+  .message.user .bubble { color: #fff; background: var(--brand); border-bottom-right-radius: 4px; }
+  .message.system .bubble {
+    max-width: 100%;
+    width: 100%;
+    color: #755724;
+    background: #fbf4e8;
+    border: 1px solid #efe0c5;
+    text-align: center;
+    font-size: 12px;
+  }
+  .suggestions { padding: 0 18px 13px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .suggestion {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--muted);
+    padding: 7px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .suggestion:hover { color: var(--brand); border-color: #afc7bb; background: var(--brand-soft); }
+  .composer { padding: 13px; border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-end; }
+  .composer textarea {
+    flex: 1;
+    min-height: 44px;
+    max-height: 120px;
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 11px 13px;
+    color: var(--ink);
+    background: #fff;
+    line-height: 1.5;
+    outline: none;
+  }
+  .composer textarea:focus { border-color: #8eb2a0; box-shadow: 0 0 0 3px rgba(31, 92, 70, .08); }
+  .send-button {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 12px;
+    color: #fff;
+    background: var(--brand);
+    font-size: 18px;
+  }
+  .send-button:disabled, .composer textarea:disabled { opacity: .5; cursor: not-allowed; }
+
+  .sidebar { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 88px; }
+  .side-card { padding: 17px; box-shadow: none; }
+  .side-title { margin: 0 0 11px; font-size: 13px; font-weight: 700; }
+  .side-copy { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+  .summary-list { margin: 0; display: grid; gap: 10px; }
+  .summary-row { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; font-size: 12px; }
+  .summary-row dt { color: var(--muted); }
+  .summary-row dd { margin: 0; text-align: right; font-weight: 620; word-break: break-word; }
+  .workflow-panel { margin-bottom: 18px; padding: 17px 18px; box-shadow: none; }
+  .workflow-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .workflow-head h2 { margin: 0; font-size: 14px; }
+  .workflow-status { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+  .workflow-count { color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+  .flow-scroll { margin-top: 15px; padding: 2px 2px 8px; overflow-x: auto; scrollbar-width: thin; }
+  .flow-row { display: flex; align-items: stretch; min-width: max-content; }
+  .flow-node {
+    position: relative;
+    width: 104px;
+    min-height: 58px;
+    display: grid;
+    place-items: center;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    color: var(--muted);
+    background: var(--surface-soft);
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.35;
+    transition: .2s ease;
+  }
+  .flow-node + .flow-node { margin-left: 24px; }
+  .flow-node + .flow-node::before {
+    content: '→';
+    position: absolute;
+    left: -19px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #aeb8b2;
+    font-size: 14px;
+  }
+  .flow-node.done { color: var(--brand); border-color: #b8d0c3; background: var(--brand-soft); }
+  .flow-node.done::after { content: '✓'; position: absolute; top: 4px; right: 6px; font-size: 9px; }
+  .flow-node.active {
+    color: #fff;
+    border-color: var(--brand);
+    background: var(--brand);
+    box-shadow: 0 0 0 5px rgba(31, 92, 70, .10);
+    animation: node-pulse 1.8s ease-in-out infinite;
+  }
+  .flow-node.failed { color: var(--danger); border-color: #e2b9b6; background: #fbefee; }
+  .flow-branches { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .flow-branch { display: inline-flex; align-items: center; gap: 7px; }
+  .flow-branch-label { color: var(--muted); font-size: 10px; }
+  .flow-branch .flow-node { width: auto; min-height: 32px; display: inline-flex; padding: 6px 9px; }
+  .flow-branch .flow-node + .flow-node { margin-left: 0; }
+  .flow-branch .flow-node::before { display: none; }
+  .current-execution { margin-top: 12px; padding: 12px 13px; border-radius: 11px; background: #f7faf8; border: 1px solid #dce8e1; }
+  .current-execution-head { display: flex; align-items: center; gap: 8px; color: var(--brand); font-size: 12px; font-weight: 700; }
+  .activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 4px rgba(31, 92, 70, .10); }
+  .current-activities { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 0; padding: 0; list-style: none; }
+  .current-activities li { color: var(--muted); background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; font-size: 10px; }
+  @keyframes node-pulse { 50% { box-shadow: 0 0 0 8px rgba(31, 92, 70, .04); } }
+  .approval textarea {
+    width: 100%;
+    min-height: 70px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 9px 10px;
+    margin: 10px 0;
+    outline: none;
+  }
+  .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .primary, .danger {
+    border: 0;
+    border-radius: 9px;
+    padding: 9px 10px;
+    color: #fff;
+    font-size: 12px;
+  }
+  .primary { background: var(--brand); }
+  .danger { background: var(--danger); }
+
+  .result { grid-column: 1 / -1; padding: 20px; margin-top: 18px; box-shadow: none; }
+  .result-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+  .result h2 { margin: 0; font-size: 18px; }
+  .result-note { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+  .report-links { display: flex; gap: 8px; flex-wrap: wrap; }
+  .report-link { color: var(--brand); background: var(--brand-soft); padding: 8px 11px; border-radius: 9px; text-decoration: none; font-size: 12px; font-weight: 650; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 17px 0; }
+  .metric { background: var(--surface-soft); border-radius: 10px; padding: 9px 11px; }
+  .metric span { display: block; color: var(--muted); font-size: 10px; }
+  .metric strong { display: block; margin-top: 3px; font-size: 14px; }
+  .itinerary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .day-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .day-card strong { font-size: 12px; }
+  .day-card p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+  .gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
+  .gallery img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 9px; background: var(--surface-soft); }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translate(-50%, 10px);
+    opacity: 0;
+    pointer-events: none;
+    color: #fff;
+    background: #17201c;
+    padding: 9px 13px;
+    border-radius: 9px;
+    font-size: 12px;
+    transition: .2s ease;
+    z-index: 30;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .conversation { min-height: 600px; }
+  }
+  @media (max-width: 560px) {
+    .topbar-inner, main { padding-left: 14px; padding-right: 14px; }
+    main { margin-top: 20px; }
+    .brand-note, .health-text { display: none; }
+    .intro h1 { font-size: 26px; }
+    .sidebar { grid-template-columns: 1fr; }
+    .conversation { min-height: 620px; }
+    #chat-box { padding: 17px 13px; }
+    .bubble { max-width: 88%; }
+    .itinerary-grid, .gallery { grid-template-columns: 1fr 1fr; }
+    .result-head { display: block; }
+    .report-links { margin-top: 12px; }
+    .workflow-panel { padding: 15px 13px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>🧳 TripOps AI · 旅行策划助手</h1>
-  <div class="sub">和 Agent 聊几句，自动完成资源搜索、路线优化、行程编排、成本核算与交付物生成</div>
-  <div class="status" id="status"></div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">T</div>
+      <div>
+        <div class="brand-name">TripOps</div>
+        <div class="brand-note">AI 旅行顾问</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div class="health" title="后端服务状态">
+        <span class="health-dot" id="health-dot"></span>
+        <span class="health-text" id="health-text">正在连接</span>
+      </div>
+      <button class="ghost-button" id="reset-button" type="button">新建对话</button>
+    </div>
+  </div>
 </header>
 
 <main>
-  <div class="tabs">
-    <button class="tab active" data-tab="chat">💬 对话策划</button>
-    <button class="tab" data-tab="direct">📝 直接策划</button>
-    <button class="tab" data-tab="result">📦 方案与审批</button>
+  <section class="intro">
+    <h1>从一段对话，到一份可执行的旅行方案</h1>
+    <p>告诉我你的想法。我会逐步补齐目的地、时间、人数、预算与偏好，信息充分后自动开始策划。</p>
+  </section>
+
+  <section class="panel workflow-panel hidden" id="progress-card" aria-label="策划节点流程">
+    <div class="workflow-head">
+      <div>
+        <h2>旅行方案生成流程</h2>
+        <p class="workflow-status" id="workflow-status">正在准备工作流</p>
+      </div>
+      <span class="workflow-count" id="workflow-count">0 / 0</span>
+    </div>
+    <div class="flow-scroll">
+      <div class="flow-row" id="flow-main"></div>
+      <div class="flow-branches" id="flow-branches"></div>
+    </div>
+    <div class="current-execution hidden" id="current-execution" aria-live="polite">
+      <div class="current-execution-head"><span class="activity-dot"></span><span id="current-node-label"></span></div>
+      <ul class="current-activities" id="current-activities"></ul>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section class="panel conversation" aria-label="旅行顾问对话">
+      <div class="conversation-head">
+        <div class="advisor">
+          <div class="avatar">AI</div>
+          <div><strong>旅行顾问</strong><span>一次只问一个关键问题</span></div>
+        </div>
+        <span class="conversation-state" id="conversation-state">了解需求</span>
+      </div>
+
+      <div id="chat-box" aria-live="polite">
+        <div class="message agent"><div class="bubble">你好，我是你的旅行顾问。先说说你想去哪里，以及大概的出行想法吧。</div></div>
+      </div>
+
+      <div class="suggestions" id="suggestions">
+        <button class="suggestion" type="button" data-prompt="4个人去内蒙古4天，人均预算3000">内蒙古 · 4人4天</button>
+        <button class="suggestion" type="button" data-prompt="暑假一家三口去北京，想玩4天">北京 · 亲子游</button>
+        <button class="suggestion" type="button" data-prompt="5个朋友去杭州玩5天，喜欢人文和美食">杭州 · 朋友游</button>
+      </div>
+
+      <div class="composer">
+        <textarea id="chat-input" rows="1" placeholder="输入你的回答，Enter 发送，Shift + Enter 换行"></textarea>
+        <button class="send-button" id="chat-send" type="button" aria-label="发送">↑</button>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="panel side-card">
+        <h2 class="side-title">需求摘要</h2>
+        <p class="side-copy" id="summary-empty">顾问会在对话中确认关键信息。完成后，这里会显示最终理解。</p>
+        <dl class="summary-list hidden" id="summary-list">
+          <div class="summary-row"><dt>目的地</dt><dd id="sum-destination">-</dd></div>
+          <div class="summary-row"><dt>出发</dt><dd id="sum-departure">-</dd></div>
+          <div class="summary-row"><dt>行程</dt><dd id="sum-duration">-</dd></div>
+          <div class="summary-row"><dt>人数</dt><dd id="sum-people">-</dd></div>
+          <div class="summary-row"><dt>预算</dt><dd id="sum-budget">-</dd></div>
+          <div class="summary-row"><dt>主题</dt><dd id="sum-themes">-</dd></div>
+          <div class="summary-row"><dt>必去</dt><dd id="sum-must">-</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel side-card approval hidden" id="approval-card">
+        <h2 class="side-title">确认方案</h2>
+        <p class="side-copy" id="approval-copy">策划已完成，确认后生成最终交付文件。</p>
+        <textarea id="approval-comment" placeholder="审批意见（可选）"></textarea>
+        <div class="button-row">
+          <button class="primary" id="approve-button" type="button">确认交付</button>
+          <button class="danger" id="reject-button" type="button">驳回</button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="panel result hidden" id="result-card">
+      <div class="result-head">
+        <div><h2>旅行方案已生成</h2><p class="result-note" id="result-note"></p></div>
+        <div class="report-links" id="report-links"></div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <div class="itinerary-grid" id="itinerary-grid"></div>
+      <div class="gallery" id="gallery"></div>
+    </section>
   </div>
-
-  <!-- 对话 -->
-  <section class="panel active" id="panel-chat">
-    <div class="card">
-      <h3>与旅行顾问对话</h3>
-      <div id="chat-box">
-        <div class="msg agent">你好！说说你的旅行想法吧，比如「暑假想带孩子去北京玩几天」。</div>
-      </div>
-      <div class="input-row">
-        <input id="chat-input" placeholder="输入你的想法…" onkeydown="if(event.key==='Enter')sendChat()">
-        <button id="chat-send" onclick="sendChat()">发送</button>
-      </div>
-      <div class="hint">信息足够后会自动生成方案需求；也可点右上「直接策划」手动填写。</div>
-    </div>
-  </section>
-
-  <!-- 直接策划 -->
-  <section class="panel" id="panel-direct">
-    <div class="card">
-      <h3>填写旅行需求</h3>
-      <div class="grid">
-        <div class="field"><label>产品标题</label><input id="f-title" placeholder="如：北京四日亲子研学之旅"></div>
-        <div class="field"><label>产品类型</label>
-          <select id="f-type">
-            <option value="family_trip">家庭出游</option>
-            <option value="study_tour" selected>研学旅行</option>
-            <option value="corporate_team_building">企业团建</option>
-            <option value="senior_friendly">银龄慢游</option>
-          </select></div>
-        <div class="field"><label>目的地</label><input id="f-dest" placeholder="如：北京"></div>
-        <div class="field"><label>出发日期</label><input id="f-date" type="date"></div>
-        <div class="field"><label>客群</label><input id="f-aud" placeholder="如：8-12岁儿童及家长"></div>
-        <div class="field"><label>天数</label><input id="f-days" type="number" value="4" min="1" max="15"></div>
-        <div class="field"><label>晚数</label><input id="f-nights" type="number" value="3" min="0" max="14"></div>
-        <div class="field"><label>人数</label><input id="f-people" type="number" value="3" min="1" max="500"></div>
-        <div class="field"><label>人均预算（元）</label><input id="f-budget" type="number" value="3000" min="100"></div>
-        <div class="field"><label>节奏</label>
-          <select id="f-pace"><option value="intense">紧凑</option><option value="moderate" selected>适中</option><option value="relaxed">轻松</option></select></div>
-        <div class="field"><label>主题（逗号分隔）</label><input id="f-themes" placeholder="历史文化, 博物馆"></div>
-        <div class="field"><label>必去地点（逗号分隔）</label><input id="f-must" placeholder="故宫"></div>
-        <div class="field"><label>避雷（逗号分隔）</label><input id="f-avoid" placeholder="购物店"></div>
-        <div class="field full"><label>硬约束（每行一条）</label><textarea id="f-constraints" rows="2" placeholder="连续乘车不超过60分钟"></textarea></div>
-      </div>
-      <div class="row-actions"><button onclick="runPlan()">🚀 开始策划</button><span class="hint" id="direct-hint"></span></div>
-    </div>
-  </section>
-
-  <!-- 结果 -->
-  <section class="panel" id="panel-result">
-    <div class="card">
-      <h3>执行进度</h3>
-      <div class="steps" id="steps"></div>
-      <div id="run-status" class="hint">尚未运行。</div>
-    </div>
-    <div class="card hidden" id="approval-card">
-      <h3>人工审批</h3>
-      <div class="hint" id="approval-msg">方案已生成，等待确认。</div>
-      <textarea id="comment" rows="2" placeholder="审批意见（可选）"></textarea>
-      <div class="row-actions">
-        <button class="green" onclick="approve(true)">✅ 批准交付</button>
-        <button class="red" onclick="approve(false)">❌ 驳回</button>
-      </div>
-    </div>
-    <div class="card hidden" id="result-card">
-      <h3>方案结果</h3>
-      <div id="result-body"></div>
-      <div class="row-actions" id="report-links"></div>
-    </div>
-  </section>
 </main>
+
 <div class="toast" id="toast"></div>
 
 <script>
-const $ = id => document.getElementById(id);
-let chatThreadId = null;
-let currentThreadId = null;
-let currentPlanId = null;
+const byId = id => document.getElementById(id);
+let chatThreadId = '';
+let planningThreadId = '';
+let currentPlanId = '';
+let planningStarted = false;
+let workflowNodes = [];
+let currentNodeId = '';
+const completedStages = new Set();
 
-// tabs
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  $('panel-' + t.dataset.tab).classList.add('active');
-}));
+function showToast(text) {
+  const toast = byId('toast');
+  toast.textContent = text;
+  toast.classList.add('show');
+  window.setTimeout(() => toast.classList.remove('show'), 2400);
+}
 
-// health
+function addMessage(role, text) {
+  const row = document.createElement('div');
+  row.className = `message ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  row.appendChild(bubble);
+  byId('chat-box').appendChild(row);
+  byId('chat-box').scrollTop = byId('chat-box').scrollHeight;
+}
+
+function setComposerEnabled(enabled) {
+  byId('chat-input').disabled = !enabled;
+  byId('chat-send').disabled = !enabled;
+}
+
+async function readResponseJson(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      detail: response.status >= 500
+        ? `后端服务发生异常（HTTP ${response.status}），请稍后重试。`
+        : `服务返回了无法识别的响应（HTTP ${response.status}）。`,
+    };
+  }
+}
+
 async function loadHealth() {
   try {
-    const r = await fetch('/api/v1/health');
-    const h = await r.json();
-    const items = [
-      ['服务', 'ok'],
-      ['模型', h.mock_model_mode ? 'Mock' : 'Ark'],
-      ['Tavily', h.tavily_mcp_configured ? '已配置' : '未配置', h.tavily_mcp_configured],
-      ['天气', h.weather_configured ? '已配置' : '未配置', h.weather_configured],
-    ];
-    $('status').innerHTML = items.map(([k, v, on]) =>
-      `<span><span class="dot ${on === false ? 'off' : 'ok'}"></span>${k}：${v}</span>`).join('');
-  } catch (e) { $('status').innerHTML = '<span>无法连接后端</span>'; }
-}
-loadHealth();
-
-function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); }
-function addMsg(role, text) {
-  const box = $('chat-box');
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  div.textContent = text;
-  box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
+    const response = await fetch('/api/v1/health');
+    if (!response.ok) throw new Error('health');
+    const health = await readResponseJson(response);
+    byId('health-dot').classList.add('ok');
+    byId('health-text').textContent = health.mock_model_mode ? '演示模式' : '服务正常';
+  } catch {
+    byId('health-text').textContent = '服务离线';
+  }
 }
 
-// ---------- chat ----------
-async function sendChat() {
-  const input = $('chat-input');
-  const text = input.value.trim();
+function renderSummary(plan) {
+  if (!plan) return;
+  byId('summary-empty').classList.add('hidden');
+  byId('summary-list').classList.remove('hidden');
+  byId('sum-destination').textContent = plan.destination || '-';
+  byId('sum-departure').textContent = plan.departure_date || plan.departure_time_note || '待确认';
+  byId('sum-duration').textContent = `${plan.days || '-'} 天 ${plan.nights ?? '-'} 晚`;
+  byId('sum-people').textContent = `${plan.group_size || '-'} 人`;
+  byId('sum-budget').textContent = plan.budget_per_person ? `¥${Number(plan.budget_per_person).toLocaleString()} / 人` : '-';
+  byId('sum-themes').textContent = (plan.themes || []).join('、') || '综合';
+  byId('sum-must').textContent = (plan.must_visit || []).join('、') || '无指定';
+}
+
+function showConversationActions(stage) {
+  const suggestions = byId('suggestions');
+  suggestions.innerHTML = '';
+  const options = stage === 'notes'
+    ? [['没有其他注意事项', '没有其他注意事项']]
+    : stage === 'confirming'
+      ? [
+          ['确认并开始', '确认，按以上需求开始策划'],
+          ['需要修改', '我需要修改需求'],
+        ]
+      : stage === 'recovery'
+        ? [
+            ['调整预算', '我想调整人均预算'],
+            ['调整天数', '我想调整行程天数'],
+            ['修改目的地', '我想修改旅行目的地'],
+            ['补充注意事项', '我想补充其他注意事项'],
+          ]
+      : [];
+  options.forEach(([label, prompt]) => {
+    const button = document.createElement('button');
+    button.className = 'suggestion';
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => sendChat(prompt));
+    suggestions.appendChild(button);
+  });
+  suggestions.classList.toggle('hidden', options.length === 0);
+}
+
+async function sendChat(prefilled = '') {
+  if (planningStarted) return;
+  const input = byId('chat-input');
+  const text = (prefilled || input.value).trim();
   if (!text) return;
   input.value = '';
-  addMsg('user', text);
-  $('chat-send').disabled = true;
+  addMessage('user', text);
+  byId('suggestions').classList.add('hidden');
+  setComposerEnabled(false);
+
   try {
-    const r = await fetch('/api/v1/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ thread_id: chatThreadId, message: text }) });
-    const d = await r.json();
-    chatThreadId = d.thread_id;
-    if (d.ready) {
-      addMsg('agent', '好的，信息足够了，我来为你生成方案！');
-      addMsg('system', '需求已结构化，可在「直接策划」中微调后提交，或直接点击下方按钮执行。');
-      fillForm(d.plan_request);
-      toast('需求已就绪，请到「直接策划」提交');
+    const response = await fetch('/api/v1/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thread_id: chatThreadId, message: text }),
+    });
+    const data = await readResponseJson(response);
+    if (!response.ok) throw new Error(data.detail || '对话请求失败');
+    chatThreadId = data.thread_id;
+    addMessage('agent', data.reply || '请再告诉我一些细节。');
+    if (data.plan_request) renderSummary(data.plan_request);
+
+    if (data.ready) {
+      planningStarted = true;
+      byId('conversation-state').textContent = '自动策划中';
+      addMessage('system', '需求已确认。系统正在搜索真实资源并生成完整方案。');
+      await startPlanning();
     } else {
-      addMsg('agent', d.reply || '请告诉我更多细节。');
+      const stageLabels = {
+        collecting: '了解需求',
+        notes: '补充注意事项',
+        confirming: '等待需求确认',
+      };
+      byId('conversation-state').textContent = stageLabels[data.stage] || '了解需求';
+      showConversationActions(data.stage);
+      setComposerEnabled(true);
+      input.focus();
     }
-  } catch (e) { addMsg('system', '请求失败：' + e.message); }
-  $('chat-send').disabled = false;
+  } catch (error) {
+    addMessage('system', `请求失败：${error.message}`);
+    setComposerEnabled(true);
+  }
 }
 
-function fillForm(p) {
-  if (!p) return;
-  if (p.title) $('f-title').value = p.title;
-  if (p.product_type) $('f-type').value = p.product_type;
-  if (p.destination) $('f-dest').value = p.destination;
-  if (p.departure_date) $('f-date').value = p.departure_date;
-  if (p.target_audience) $('f-aud').value = p.target_audience;
-  if (p.days) $('f-days').value = p.days;
-  if (p.nights !== undefined) $('f-nights').value = p.nights;
-  if (p.group_size) $('f-people').value = p.group_size;
-  if (p.budget_per_person) $('f-budget').value = p.budget_per_person;
-  if (p.pace) $('f-pace').value = p.pace;
-  if (p.themes && p.themes.length) $('f-themes').value = p.themes.join(', ');
-  if (p.must_visit && p.must_visit.length) $('f-must').value = p.must_visit.join(', ');
-  if (p.avoid && p.avoid.length) $('f-avoid').value = p.avoid.join(', ');
-  if (p.hard_constraints && p.hard_constraints.length) $('f-constraints').value = p.hard_constraints.join('\n');
-}
-
-// ---------- direct plan ----------
-function collectPlan() {
-  const split = s => s.split(/[,，]/).map(x => x.trim()).filter(Boolean);
-  const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
-  const days = parseInt($('f-days').value) || 3;
-  return {
-    title: $('f-title').value.trim() || ($('f-dest').value.trim() || '旅行') + '之旅',
-    product_type: $('f-type').value,
-    destination: $('f-dest').value.trim(),
-    departure_date: $('f-date').value || null,
-    days, nights: parseInt($('f-nights').value) || days - 1,
-    group_size: parseInt($('f-people').value) || 2,
-    budget_per_person: parseInt($('f-budget').value) || 2000,
-    target_audience: $('f-aud').value.trim() || '普通游客',
-    themes: split($('f-themes').value),
-    pace: $('f-pace').value,
-    must_visit: split($('f-must').value),
-    avoid: split($('f-avoid').value),
-    hard_constraints: lines($('f-constraints').value),
-  };
-}
-
-async function runPlan() {
-  const plan = collectPlan();
-  if (!plan.destination) { toast('请填写目的地'); return; }
-  currentThreadId = null; currentPlanId = null;
-  $('steps').innerHTML = '';
-  $('run-status').textContent = '正在执行工作流…';
-  $('approval-card').classList.add('hidden');
-  $('result-card').classList.add('hidden');
-  $('direct-hint').textContent = '执行中（真实调用 LLM / 搜索，可能需要 1-3 分钟）…';
-  document.querySelector('[data-tab="result"]').click();
-
+async function startPlanning() {
+  byId('progress-card').classList.remove('hidden');
+  byId('workflow-status').textContent = '正在启动策划工作流…';
   try {
-    const res = await fetch('/api/v1/plans/run/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
-    if (!res.ok || !res.body) { const t = await res.text(); throw new Error(t.slice(0, 200)); }
-    const reader = res.body.getReader();
+    const response = await fetch(`/api/v1/chat/${encodeURIComponent(chatThreadId)}/plan/stream`, { method: 'POST' });
+    if (!response.ok || !response.body) {
+      const body = await readResponseJson(response);
+      throw new Error(body.detail || '无法启动策划');
+    }
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buf = '';
+    let buffer = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      buffer += decoder.decode(value, { stream: true });
+      let splitAt;
+      while ((splitAt = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, splitAt);
+        buffer = buffer.slice(splitAt + 2);
         const lines = block.split('\n');
-        const ev = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();
-        const dataLine = (lines.find(l => l.startsWith('data:')) || '').slice(5).trim();
-        if (!dataLine) continue;
-        let obj; try { obj = JSON.parse(dataLine); } catch { continue; }
-        handleSSE(ev, obj);
+        const event = (lines.find(line => line.startsWith('event:')) || '').slice(6).trim();
+        const rawData = (lines.find(line => line.startsWith('data:')) || '').slice(5).trim();
+        if (!rawData) continue;
+        try { handleStreamEvent(event, JSON.parse(rawData)); } catch { /* ignore malformed chunk */ }
       }
     }
-  } catch (e) {
-    $('run-status').textContent = '执行失败：' + e.message;
-  }
-  $('direct-hint').textContent = '';
-}
-
-function handleSSE(ev, obj) {
-  if (ev === 'started') {
-    currentThreadId = obj.thread_id; currentPlanId = obj.plan_id;
-    $('steps').innerHTML = '';
-  } else if (ev === 'node_start') {
-    addStep(obj.node, true);
-    $('run-status').textContent = '执行中：' + obj.node;
-  } else if (ev === 'node_end') {
-    markStepDone(obj.node);
-  } else if (ev === 'completed') {
-    $('run-status').textContent = '已完成，等待审批（当前阶段：' + (obj.current_stage || 'unknown') + '）';
-    $('approval-card').classList.remove('hidden');
-    $('approval-msg').textContent = `方案 ${currentPlanId} 已生成，等待人工审批。`;
-  } else if (ev === 'error') {
-    $('run-status').textContent = '错误：' + (obj.message || 'unknown');
+  } catch (error) {
+    clearCurrentNode();
+    byId('workflow-status').textContent = '策划请求未完成，可调整后重试';
+    enableFailureRecovery({
+      message: error.message,
+      failure_reasons: [`策划服务未能完成请求：${error.message}`],
+    });
   }
 }
 
-function addStep(name, active) {
-  const div = document.createElement('span');
-  div.className = 'step' + (active ? ' active' : '');
-  div.dataset.name = name;
-  div.textContent = name;
-  $('steps').appendChild(div);
+function createFlowNode(node) {
+  const element = document.createElement('div');
+  element.className = 'flow-node';
+  element.dataset.nodeId = node.id;
+  element.textContent = node.label;
+  return element;
 }
-function markStepDone(name) {
-  document.querySelectorAll('.step').forEach(s => {
-    if (s.dataset.name === name) { s.classList.remove('active'); s.classList.add('done'); }
+
+function renderWorkflow(nodes) {
+  workflowNodes = nodes || [];
+  byId('flow-main').innerHTML = '';
+  byId('flow-branches').innerHTML = '';
+  workflowNodes.filter(node => node.group === 'main').forEach(node => {
+    byId('flow-main').appendChild(createFlowNode(node));
   });
+  workflowNodes.filter(node => node.group !== 'main').forEach(node => {
+    const branch = document.createElement('div');
+    branch.className = 'flow-branch';
+    const caption = document.createElement('span');
+    caption.className = 'flow-branch-label';
+    caption.textContent = node.group === 'repair' ? '异常回路' : '终止路径';
+    branch.append(caption, createFlowNode(node));
+    byId('flow-branches').appendChild(branch);
+  });
+  updateWorkflowCount();
 }
 
-// ---------- approval ----------
-async function approve(approved) {
-  if (!currentThreadId) { toast('没有可审批的方案'); return; }
-  const body = { approved, reviewer_id: 'web-user', comment: $('comment').value.trim() || null };
-  try {
-    const r = await fetch(`/api/v1/plans/${currentThreadId}/approval`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const d = await r.json();
-    $('approval-card').classList.add('hidden');
-    $('result-card').classList.remove('hidden');
-    renderResult(d);
-    toast(approved ? '已批准，正在生成交付物' : '已驳回');
-  } catch (e) { toast('审批失败：' + e.message); }
+function findWorkflowNode(id) {
+  return workflowNodes.find(node => node.id === id);
 }
 
-function renderResult(d) {
-  const stage = d.current_stage || 'unknown';
-  let html = `<p><span class="badge info">状态：${stage}</span> <span class="badge info">方案：${currentPlanId || '-'}</span></p>`;
-  const data = d.data || {};
-  const itinerary = data.itinerary || [];
-  if (itinerary.length) {
-    html += '<h3 style="margin-top:12px">分日行程</h3><table><tr><th>天</th><th>主题</th><th>活动</th></tr>';
-    for (const day of itinerary) {
-      const acts = (day.events || []).map(e => `${e.start_time}-${e.end_time} ${e.title}`).join('；');
-      html += `<tr><td>Day ${day.day}</td><td>${day.theme}</td><td>${acts}</td></tr>`;
+function nodeElement(id) {
+  return byId('progress-card').querySelector(`[data-node-id="${id}"]`);
+}
+
+function updateWorkflowCount() {
+  const mainCount = workflowNodes.filter(node => node.group === 'main').length;
+  const completedMain = workflowNodes.filter(
+    node => node.group === 'main' && completedStages.has(node.id)
+  ).length;
+  byId('workflow-count').textContent = `${completedMain} / ${mainCount}`;
+}
+
+function clearCurrentNode() {
+  if (currentNodeId) nodeElement(currentNodeId)?.classList.remove('active');
+  currentNodeId = '';
+  byId('current-execution').classList.add('hidden');
+  byId('current-node-label').textContent = '';
+  byId('current-activities').innerHTML = '';
+}
+
+function showCurrentNode(id, eventData = null) {
+  clearCurrentNode();
+  const node = eventData?.label ? eventData : findWorkflowNode(id);
+  if (!node) return;
+  currentNodeId = id;
+  nodeElement(id)?.classList.add('active');
+  byId('workflow-status').textContent = `正在执行：${node.label}`;
+  byId('current-node-label').textContent = `${node.label}正在处理`;
+  byId('current-activities').innerHTML = '';
+  (node.activities || []).forEach(activity => {
+    const item = document.createElement('li');
+    item.textContent = activity;
+    byId('current-activities').appendChild(item);
+  });
+  byId('current-execution').classList.remove('hidden');
+}
+
+function finishNode(id) {
+  if (!id) return;
+  completedStages.add(id);
+  const element = nodeElement(id);
+  element?.classList.remove('active');
+  element?.classList.add(id === 'mark_failed' ? 'failed' : 'done');
+  if (currentNodeId === id) clearCurrentNode();
+  updateWorkflowCount();
+}
+
+function enableFailureRecovery(data) {
+  clearCurrentNode();
+  planningStarted = false;
+  setComposerEnabled(true);
+  byId('conversation-state').textContent = '需要调整';
+  const reasons = Array.isArray(data.failure_reasons) && data.failure_reasons.length
+    ? data.failure_reasons
+    : [data.message || '当前条件下方案未通过可执行性检查。'];
+  const reasonText = reasons.map(reason => `• ${reason}`).join('\n');
+  addMessage(
+    'agent',
+    `这次策划没有完成，原因是：\n${reasonText}\n\n你可以直接告诉我要调整哪项需求。修改后我会重新整理摘要，等你再次确认后重试。`,
+  );
+  showConversationActions('recovery');
+  byId('chat-input').focus();
+}
+
+function handleStreamEvent(event, data) {
+  if (event === 'started') {
+    planningThreadId = data.thread_id;
+    currentPlanId = data.plan_id;
+    renderWorkflow(data.workflow || []);
+  } else if (event === 'node_start') {
+    showCurrentNode(data.id || data.node, data);
+  } else if (event === 'node_end') {
+    finishNode(data.id || data.node);
+  } else if (event === 'completed') {
+    if (data.requires_approval) {
+      finishNode('approval_gate');
+      clearCurrentNode();
+      byId('workflow-status').textContent = '自动策划已完成，等待你确认';
+      byId('conversation-state').textContent = '等待确认';
+      byId('approval-card').classList.remove('hidden');
+      addMessage('agent', '方案已完成自动审核。请在右侧确认，我会生成最终 PDF 和 Markdown。');
+    } else if (data.recoverable || data.current_stage === 'failed') {
+      clearCurrentNode();
+      byId('workflow-status').textContent = '策划未通过，可修改需求后重试';
+      enableFailureRecovery(data);
+    } else {
+      clearCurrentNode();
+      byId('workflow-status').textContent = `工作流已结束：${data.current_stage || 'unknown'}`;
+      addMessage('system', '方案未进入交付阶段，请查看执行状态。');
     }
-    html += '</table>';
+  } else if (event === 'error') {
+    clearCurrentNode();
+    byId('workflow-status').textContent = '执行异常，可修改需求后重试';
+    enableFailureRecovery(data);
   }
-  const quote = data.quote;
-  if (quote) {
-    html += `<p style="margin-top:10px"><span class="badge info">总成本 ¥${quote.total_cost.toLocaleString()}</span> ` +
-      `<span class="badge info">人均售价 ¥${quote.sale_price_per_person.toLocaleString()}</span> ` +
-      `<span class="badge info">毛利率 ${(quote.margin_rate * 100).toFixed(1)}%</span></p>`;
-  }
-  $('result-body').innerHTML = html;
-
-  const links = [];
-  if (currentPlanId) {
-    links.push(`<a class="link" target="_blank" href="/files/plans/${currentPlanId}/report.pdf">📄 查看 PDF 报告</a>`);
-    links.push(`<a class="link" target="_blank" href="/files/plans/${currentPlanId}/report.md">📝 查看 Markdown 报告</a>`);
-  }
-  $('report-links').innerHTML = links.join('　');
 }
+
+async function approvePlan(approved) {
+  if (!planningThreadId) return showToast('没有可确认的方案');
+  byId('approve-button').disabled = true;
+  byId('reject-button').disabled = true;
+  const approvalNode = approved ? 'finalize_delivery' : 'mark_rejected';
+  showCurrentNode(approvalNode);
+  try {
+    const response = await fetch(`/api/v1/plans/${encodeURIComponent(planningThreadId)}/approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        approved,
+        reviewer_id: 'web-user',
+        comment: byId('approval-comment').value.trim() || null,
+      }),
+    });
+    const data = await readResponseJson(response);
+    if (!response.ok) throw new Error(data.detail || '确认失败');
+    byId('approval-card').classList.add('hidden');
+    finishNode(approvalNode);
+    clearCurrentNode();
+    if (approved && data.current_stage === 'delivered') {
+      byId('workflow-status').textContent = '全部流程已完成';
+      byId('conversation-state').textContent = '已交付';
+      addMessage('agent', '方案已交付。你可以在下方查看精简 PDF 和详细 Markdown。');
+      renderResult(data);
+    } else {
+      byId('workflow-status').textContent = '方案已驳回，流程结束';
+      byId('conversation-state').textContent = '已驳回';
+      addMessage('system', '方案已驳回，审批意见已保留。');
+    }
+  } catch (error) {
+    clearCurrentNode();
+    byId('workflow-status').textContent = `处理失败：${error.message}`;
+    showToast(error.message);
+    byId('approve-button').disabled = false;
+    byId('reject-button').disabled = false;
+  }
+}
+
+function appendMetric(label, value) {
+  const box = document.createElement('div');
+  box.className = 'metric';
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  const strong = document.createElement('strong');
+  strong.textContent = value;
+  box.append(caption, strong);
+  byId('metrics').appendChild(box);
+}
+
+function renderResult(response) {
+  const data = response.data || {};
+  byId('result-card').classList.remove('hidden');
+  byId('result-note').textContent = `方案 ${currentPlanId || '-'} · ${response.message || '交付完成'}`;
+  byId('metrics').innerHTML = '';
+  if (data.quote) {
+    appendMetric('团队总成本', `¥${Number(data.quote.total_cost).toLocaleString()}`);
+    appendMetric('建议人均售价', `¥${Number(data.quote.sale_price_per_person).toLocaleString()}`);
+    appendMetric('预计毛利率', `${(Number(data.quote.margin_rate) * 100).toFixed(1)}%`);
+  }
+
+  byId('itinerary-grid').innerHTML = '';
+  (data.itinerary || []).forEach(day => {
+    const card = document.createElement('article');
+    card.className = 'day-card';
+    const title = document.createElement('strong');
+    title.textContent = `DAY ${day.day}  ${day.theme}`;
+    const activities = document.createElement('p');
+    activities.textContent = (day.events || []).map(event => event.title).join(' / ');
+    card.append(title, activities);
+    byId('itinerary-grid').appendChild(card);
+  });
+
+  byId('gallery').innerHTML = '';
+  (data.day_image_paths || []).forEach(paths => {
+    const list = Array.isArray(paths) ? paths : (paths ? [paths] : []);
+    list.slice(0, 1).forEach(path => {
+      const filename = String(path).split('/').pop();
+      if (!filename || !currentPlanId) return;
+      const image = document.createElement('img');
+      image.loading = 'lazy';
+      image.alt = '行程配图';
+      image.src = `/files/plans/${encodeURIComponent(currentPlanId)}/${encodeURIComponent(filename)}`;
+      byId('gallery').appendChild(image);
+    });
+  });
+
+  byId('report-links').innerHTML = '';
+  if (currentPlanId) {
+    [['PDF 报告', 'report.pdf'], ['Markdown 详情', 'report.md']].forEach(([label, filename]) => {
+      const link = document.createElement('a');
+      link.className = 'report-link';
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = label;
+      link.href = `/files/plans/${encodeURIComponent(currentPlanId)}/${filename}`;
+      byId('report-links').appendChild(link);
+    });
+  }
+  byId('result-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+byId('chat-send').addEventListener('click', () => sendChat());
+byId('chat-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendChat();
+  }
+});
+byId('chat-input').addEventListener('input', event => {
+  event.target.style.height = '44px';
+  event.target.style.height = `${Math.min(event.target.scrollHeight, 120)}px`;
+});
+document.querySelectorAll('[data-prompt]').forEach(button => {
+  button.addEventListener('click', () => sendChat(button.dataset.prompt || ''));
+});
+byId('approve-button').addEventListener('click', () => approvePlan(true));
+byId('reject-button').addEventListener('click', () => approvePlan(false));
+byId('reset-button').addEventListener('click', () => window.location.reload());
+
+loadHealth();
+byId('chat-input').focus();
 </script>
 </body>
 </html>

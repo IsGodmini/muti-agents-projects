@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -77,6 +78,11 @@ class PosterService:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(image_url)
             response.raise_for_status()
+            content_type = response.headers.get("content-type", "").lower()
+            if "image/" not in content_type and not response.content.startswith(
+                (b"\x89PNG", b"\xff\xd8\xff")
+            ):
+                raise RuntimeError(f"Downloaded fallback is not an image ({content_type or 'unknown'})")
             local_path.write_bytes(response.content)
 
         logger.info("Poster saved → %s (%d KB)", local_path, len(response.content) // 1024)
@@ -109,8 +115,15 @@ class PosterService:
     async def _poll_history(
         self, client: httpx.AsyncClient, base_url: str, prompt_id: str
     ) -> dict[str, str]:
-        elapsed = 0.0
-        while elapsed < POLL_TIMEOUT_SECONDS:
+        queued_at = time.monotonic()
+        execution_started_at: float | None = None
+        queue_timeout = getattr(
+            self.settings, "imagegen_queue_timeout_seconds", POLL_TIMEOUT_SECONDS
+        )
+        execution_timeout = getattr(
+            self.settings, "imagegen_execution_timeout_seconds", POLL_TIMEOUT_SECONDS
+        )
+        while True:
             history_response = await client.get(f"{base_url}/history/{prompt_id}")
             history_response.raise_for_status()
             history = history_response.json()
@@ -133,9 +146,25 @@ class PosterService:
                     f"ComfyUI prompt {prompt_id} completed but no images found in outputs."
                 )
 
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
-            elapsed += POLL_INTERVAL_SECONDS
+            queue_response = await client.get(f"{base_url}/queue")
+            queue_response.raise_for_status()
+            queue = queue_response.json()
+            running_ids = {item[1] for item in queue.get("queue_running", [])}
+            pending_ids = {item[1] for item in queue.get("queue_pending", [])}
+            now = time.monotonic()
+            if prompt_id in running_ids:
+                execution_started_at = execution_started_at or now
+                if now - execution_started_at > execution_timeout:
+                    raise TimeoutError(
+                        f"ComfyUI prompt {prompt_id} execution exceeded "
+                        f"{execution_timeout:.0f}s."
+                    )
+            elif prompt_id in pending_ids:
+                if now - queued_at > queue_timeout:
+                    raise TimeoutError(
+                        f"ComfyUI prompt {prompt_id} queue wait exceeded {queue_timeout:.0f}s."
+                    )
+            elif now - queued_at > queue_timeout:
+                raise RuntimeError(f"ComfyUI prompt {prompt_id} disappeared from queue and history.")
 
-        raise TimeoutError(
-            f"ComfyUI prompt {prompt_id} did not complete within {POLL_TIMEOUT_SECONDS}s."
-        )
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)

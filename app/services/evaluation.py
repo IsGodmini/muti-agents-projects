@@ -17,6 +17,7 @@ from app.models.schemas import (
     Quote,
     ResourceCandidate,
 )
+from app.services.resource_matching import matches_place_name
 
 
 @dataclass
@@ -109,8 +110,11 @@ def _eval_executability(
             continue
 
     if quote and request.budget_per_person > 0:
-        budget_total = request.budget_per_person * request.group_size
-        metrics.budget_error_rate = abs(quote.total_cost - budget_total) / max(budget_total, 1)
+        metrics.budget_error_rate = max(
+            0.0,
+            (quote.sale_price_per_person - request.budget_per_person)
+            / request.budget_per_person,
+        )
 
     if constraint_report:
         metrics.time_conflict_count = max(
@@ -129,7 +133,9 @@ def _eval_personalization(
 
     if request.must_visit:
         covered = sum(
-            1 for mv in request.must_visit if mv.lower() in scheduled_text
+            1
+            for must_visit in request.must_visit
+            if any(matches_place_name(name, must_visit) for name in scheduled_names)
         )
         metrics.must_visit_coverage = covered / len(request.must_visit)
 

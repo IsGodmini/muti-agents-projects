@@ -32,7 +32,11 @@ WEATHER_OK = {
 
 def _make(handler) -> WeatherClient:
     transport = httpx.MockTransport(handler)
-    return WeatherClient(api_key="test-key", base_url="https://xxx.re.qweatherapi.com/v7", transport=transport)
+    return WeatherClient(
+        api_key="test-key",
+        base_url="https://xxx.re.qweatherapi.com/v7",
+        transport=transport,
+    )
 
 
 @pytest.mark.asyncio
@@ -41,6 +45,7 @@ async def test_city_name_resolved_via_geoapi() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(str(request.url))
+        assert request.headers["X-QW-Api-Key"] == "test-key"
         if "/geo/v2/city/lookup" in request.url.path:
             return httpx.Response(200, json=GEO_OK)
         return httpx.Response(200, json=WEATHER_OK)
@@ -62,6 +67,7 @@ async def test_city_name_resolved_via_geoapi() -> None:
     assert result[0]["temp_min"] == 25
     assert result[0]["wind_scale_day"] == "2"
     assert result[0]["humidity"] == 60
+    assert result[0]["provider"] == "qweather"
 
 
 @pytest.mark.asyncio

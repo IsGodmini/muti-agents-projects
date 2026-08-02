@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from urllib.parse import urlencode
 
 import httpx
 
@@ -21,12 +22,27 @@ from app.services.tools.base import (
 logger = logging.getLogger(__name__)
 
 
+class AmapAPIError(RuntimeError):
+    """Raised when Amap returns an application-level error response."""
+
+    def __init__(self, info: str, infocode: str) -> None:
+        self.info = info
+        self.infocode = infocode
+        super().__init__(f"Amap API error: {info} ({infocode})")
+
+
 class AmapClient:
     """Gaode Maps REST API client."""
 
-    def __init__(self, api_key: str, base_url: str = "https://restapi.amap.com/v3") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://restapi.amap.com/v3",
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self._transport = transport
 
     async def search_poi(
         self,
@@ -95,13 +111,46 @@ class AmapClient:
 
         return 30
 
+    async def weather_forecast(self, city: str, days: int = 4) -> list[dict]:
+        """Return Amap's real multi-day forecast as a QWeather-compatible shape."""
+        geocode = await self._get(
+            "/geocode/geo",
+            {"key": self.api_key, "address": city, "city": city, "output": "json"},
+        )
+        geocodes = geocode.get("geocodes", [])
+        if not geocodes or not geocodes[0].get("adcode"):
+            raise AmapAPIError(f"No adcode found for {city}", "NO_ADCODE")
+        data = await self._get(
+            "/weather/weatherInfo",
+            {
+                "key": self.api_key,
+                "city": str(geocodes[0]["adcode"]),
+                "extensions": "all",
+                "output": "json",
+            },
+        )
+        forecasts = data.get("forecasts", [])
+        casts = forecasts[0].get("casts", []) if forecasts else []
+        return [
+            {
+                "date": str(item.get("date", "")),
+                "text_day": str(item.get("dayweather", "未知")),
+                "temp_max": int(item.get("daytemp") or 25),
+                "temp_min": int(item.get("nighttemp") or 15),
+                "wind_scale_day": str(item.get("daypower") or "-"),
+                "humidity": 60,
+                "provider": "amap",
+            }
+            for item in casts[: max(1, min(days, 4))]
+        ]
+
     async def _get(self, endpoint: str, params: dict) -> dict:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, transport=self._transport) as client:
             response = await client.get(f"{self.base_url}{endpoint}", params=params)
             response.raise_for_status()
             data = response.json()
             if data.get("status") != "1" and data.get("infocode") != "10000":
-                logger.warning("Amap API error: %s %s", data.get("info"), data.get("infocode"))
+                raise AmapAPIError(str(data.get("info", "unknown")), str(data.get("infocode", "")))
             return data
 
     def _poi_to_place(self, poi: dict) -> Place:
@@ -120,6 +169,13 @@ class AmapClient:
         cost_str = poi.get("biz_ext", {}).get("cost", "")
         price = int(float(cost_str)) if isinstance(cost_str, str) and cost_str and cost_str != "[]" else 0
 
+        source_url = "https://uri.amap.com/marker?" + urlencode({
+            "poiid": str(poi.get("id", "")),
+            "name": str(poi.get("name", "")),
+            "src": "tripops",
+            "callnative": "0",
+        })
+
         return Place(
             place_id=poi.get("id", ""),
             name=poi.get("name", ""),
@@ -136,7 +192,7 @@ class AmapClient:
             ),
             price=price,
             rating=rating,
-            source_url=None,
+            source_url=source_url,
             summary=poi.get("pname", "") + poi.get("cityname", "") + poi.get("adname", ""),
             retrieved_at=datetime.now(UTC),
             provider="amap",
